@@ -1,0 +1,32 @@
+services:
+  s23-minecraft-manager:
+    container_name: s23-minecraft-manager
+    image: ghcr.io/matheusgmendes/s23minecraft:latest
+    build: .
+    ports:
+      - "8092:3000"
+    extra_hosts:
+      # Lets the manager reach the published Minecraft port via the host gateway.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - manager-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount the directory holding YOUR Minecraft compose file. The manager
+      # writes a .env in here and runs `docker compose up -d` against it.
+      - ./minecraft:/mc
+    environment:
+      MC_COMPOSE_DIR: /mc
+      MC_CONTAINER: s23-minecraft       # must match container_name in your MC compose
+      MC_HOST: host.docker.internal
+      MC_PORT: "25565"
+      LIFETIME_DAYS: "40"
+      # Always-on operators, never visible in the UI. Comma-separated names.
+      HIDDEN_OPS: "Mendes57"
+      # Host paths the user's MC compose substitutes into bind mounts.
+      # Each season gets <HDD>/seasons/<season-name> and <BACKUP>/seasons/<season-name>.
+      HDD: /srv/minecraft
+      BACKUP: /srv/minecraft-backups
+    restart: unless-stopped
+
+volumes:
+  manager-data:

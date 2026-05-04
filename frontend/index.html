@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>S23 Minecraft</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>S23 Minecraft</h1>
+      <p class="subtitle" id="subtitle">…</p>
+    </header>
+
+    <section class="status-card">
+      <div class="status-row">
+        <span class="status-dot" id="status-dot"></span>
+        <span class="status-text" id="status-text">…</span>
+        <span class="players" id="players-text"></span>
+      </div>
+      <div class="players-list" id="players-list" hidden></div>
+      <div class="motd-line" id="motd-line"></div>
+      <div class="connect-line" id="connect-line"></div>
+      <div class="actions" id="start-actions">
+        <button id="start-btn" type="button">Start server</button>
+      </div>
+      <div class="season-row">
+        <span class="season-label">Season</span>
+        <span class="season-progress"><span id="season-bar"></span></span>
+        <span class="season-info" id="season-info">…</span>
+      </div>
+      <button id="extend-btn" type="button" class="extend-btn" hidden>Extend season by 5 days</button>
+    </section>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab" type="button" data-tab="settings" hidden>Settings</button>
+      <button class="tab active" type="button" data-tab="logs">Logs</button>
+    </nav>
+
+    <div class="tab-panel" data-tab="settings" hidden>
+      <section class="settings-card">
+        <form id="settings-form">
+          <p class="muted">Submitting wipes the world and starts a fresh 40-day season.</p>
+          <div class="grid"></div>
+          <button type="submit" id="apply-btn">Apply &amp; start new season</button>
+        </form>
+      </section>
+    </div>
+
+    <div class="tab-panel" data-tab="logs">
+      <section class="logs-card">
+        <div class="logs-header">
+          <h2>Server logs</h2>
+          <label class="logs-follow"><input type="checkbox" id="logs-follow" checked /> follow</label>
+        </div>
+        <pre id="logs" class="logs-pre">(idle)</pre>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

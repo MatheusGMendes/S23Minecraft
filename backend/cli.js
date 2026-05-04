@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+// Admin CLI for the manager. Talks to the same compose dir and SQLite DB
+// as server.js. Run via: docker exec s23-minecraft-manager s23 <command>
+
+const path = require('path');
+const fs = require('fs');
+const { execFile } = require('child_process');
+const Docker = require('dockerode');
+const Database = require('better-sqlite3');
+
+const DATA_DIR       = process.env.DATA_DIR       || path.join(__dirname, 'data');
+const MC_COMPOSE_DIR = process.env.MC_COMPOSE_DIR || '/mc';
+const MC_CONTAINER   = process.env.MC_CONTAINER   || 's23-minecraft';
+const LIFETIME_DAYS  = Number(process.env.LIFETIME_DAYS || 40);
+const HIDDEN_OPS     = process.env.HIDDEN_OPS || '';
+
+const SETTING_KEYS = [
+  'VERSION', 'DIFFICULTY', 'MODE',
+  'SEED', 'ONLINE_MODE', 'MOTD', 'OPS', 'ICON',
+];
+
+const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+const db = new Database(path.join(DATA_DIR, 'state.db'));
+
+function compose(args) {
+  return new Promise((resolve, reject) => {
+    execFile('docker', ['compose', ...args], { cwd: MC_COMPOSE_DIR }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(stderr.trim() || err.message));
+      resolve(stdout);
+    });
+  });
+}
+
+function mergeOps(playerInput) {
+  const all = [HIDDEN_OPS, playerInput]
+    .flatMap(s => String(s || '').split(','))
+    .map(s => s.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const name of all) {
+    const key = name.toLowerCase();
+    if (!seen.has(key)) { seen.add(key); out.push(name); }
+  }
+  return out.join(',');
+}
+
+function seasonNameFor(seasonId, seasonStartedMs) {
+  const d = new Date(seasonStartedMs);
+  const date = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+  return `season-${String(seasonId).padStart(3, '0')}-${date}`;
+}
+
+function writeEnvFile(settings, seasonName) {
+  const lines = SETTING_KEYS.map(k => {
+    const value = k === 'OPS' ? mergeOps(settings[k]) : (settings[k] ?? '');
+    return `${k}=${value}`;
+  });
+  lines.unshift(`SEASON_NAME=${seasonName}`);
+  fs.writeFileSync(path.join(MC_COMPOSE_DIR, '.env'), lines.join('\n') + '\n');
+}
+
+async function findMc() {
+  const list = await docker.listContainers({ all: true });
+  const c = list.find(c => c.Names.some(n => n === '/' + MC_CONTAINER));
+  return c ? docker.getContainer(c.Id) : null;
+}
+
+const getState = () => {
+  const r = db.prepare('SELECT season_started, settings, season_id FROM state WHERE id = 1').get();
+  const seasonId = r.season_id || 1;
+  return {
+    seasonStarted: r.season_started,
+    settings: JSON.parse(r.settings),
+    seasonId,
+    seasonName: seasonNameFor(seasonId, r.season_started),
+  };
+};
+
+const cmds = {
+  async status() {
+    const s = getState();
+    const c = await findMc();
+    let running = false;
+    if (c) running = (await c.inspect()).State.Running;
+    const expiresAt = new Date(s.seasonStarted + 40 * 86400 * 1000);
+    console.log(`compose dir:    ${MC_COMPOSE_DIR}`);
+    console.log(`season:         #${s.seasonId} (${s.seasonName})`);
+    console.log(`container:      ${c ? MC_CONTAINER : '(none)'}`);
+    console.log(`running:        ${running}`);
+    console.log(`season started: ${new Date(s.seasonStarted).toISOString()}`);
+    console.log(`season expires: ${expiresAt.toISOString()}`);
+    console.log(`expired:        ${Date.now() >= expiresAt.getTime()}`);
+    console.log(`settings:       ${JSON.stringify(s.settings, null, 2)}`);
+  },
+
+  async start() {
+    const s = getState();
+    writeEnvFile(s.settings, s.seasonName);
+    console.log(await compose(['up', '-d']));
+  },
+
+  async stop() {
+    try {
+      console.log(await compose(['stop']));
+    } catch (e) {
+      console.error(e.message);
+      process.exit(1);
+    }
+  },
+
+  async expire() {
+    db.prepare('UPDATE state SET season_started = 0 WHERE id = 1').run();
+    console.log('season backdated — settings are now unlocked in the UI');
+  },
+
+  async extend() {
+    const days = Number(process.argv[3] || 5);
+    if (!Number.isFinite(days)) { console.error('usage: s23 extend <days>'); process.exit(1); }
+    db.prepare('UPDATE state SET extension_days = extension_days + ? WHERE id = 1').run(days);
+    console.log(`extended season by ${days} days`);
+  },
+
+  'expires-in': async () => {
+    const days = Number(process.argv[3]);
+    if (!Number.isFinite(days)) { console.error('usage: s23 expires-in <days>'); process.exit(1); }
+
+    // Move the deadline to (now + X days) by adjusting extension_days only.
+    // The day counter (elapsed = now - season_started) never changes.
+    // extension_days can go negative (= season effectively shorter than 40 days).
+    const r = db.prepare('SELECT season_started FROM state WHERE id = 1').get();
+    const elapsedDays = (Date.now() - r.season_started) / 86400000;
+    const targetExt = Math.round(elapsedDays + days - LIFETIME_DAYS);
+    db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(targetExt);
+    console.log(`forced state: season expires in ${days} day${days === 1 ? '' : 's'}`);
+  },
+
+  async renew() {
+    db.prepare('UPDATE state SET season_started = ? WHERE id = 1').run(Date.now());
+    console.log('season reset to now — locked for 40 days');
+  },
+
+  async reset() {
+    try { console.log(await compose(['down'])); } catch (e) { console.warn('down warn:', e.message); }
+    db.prepare(`
+      UPDATE state
+         SET season_started = ?, extension_days = 0, season_id = season_id + 1
+       WHERE id = 1
+    `).run(Date.now());
+    const s = getState();
+    writeEnvFile(s.settings, s.seasonName);
+    console.log(await compose(['up', '-d']));
+    console.log(`new season started: #${s.seasonId} (${s.seasonName}). Old data preserved on disk.`);
+  },
+
+  async restore() {
+    console.log('Running restore-tar-backup against the latest archive…');
+    try {
+      console.log(await compose(['stop', 'minecraft']));
+    } catch (e) { console.warn('stop minecraft warn:', e.message); }
+    console.log(await compose(['run', '--rm', 'restore-backup']));
+    console.log(await compose(['up', '-d']));
+    console.log('Restore complete.');
+  },
+};
+
+const usage = `usage: s23 <command>
+
+  status              show current state, current season name, and expiry
+  start               docker compose up -d
+  stop                docker compose stop
+  expire              backdate season so settings unlock in the UI
+  extend [days]       add days to current season (default 5)
+  expires-in <days>   force season to expire in N days from now
+  renew               set season_started = now (lock for ${LIFETIME_DAYS} days)
+  reset               start a new season — new folder, fresh world, old archived
+  restore             restore the latest backup into the current season's world
+`;
+
+(async () => {
+  const cmd = process.argv[2];
+  if (!cmd || !cmds[cmd]) { console.log(usage); process.exit(cmd ? 1 : 0); }
+  try { await cmds[cmd](); } catch (e) { console.error(e.message); process.exit(1); }
+})();
