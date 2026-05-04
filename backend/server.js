@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { execFile } = require('child_process');
 const Docker = require('dockerode');
 const Database = require('better-sqlite3');
@@ -63,6 +64,9 @@ if (!cols.includes('season_id')) {
   // submits settings. Until then the form is editable so the deployer can
   // configure version/MOTD/OPS before the season clock starts.
   db.exec('ALTER TABLE state ADD COLUMN season_id INTEGER NOT NULL DEFAULT 0');
+}
+if (!cols.includes('rcon_password')) {
+  db.exec("ALTER TABLE state ADD COLUMN rcon_password TEXT NOT NULL DEFAULT ''");
 }
 
 function seasonNameFor(seasonId, seasonStartedMs) {
@@ -146,12 +150,35 @@ function mergeOps(playerInput) {
   return out.join(',');
 }
 
+// If the user's compose dir is empty (first run), drop in the bundled
+// default MC compose so things work out of the box.
+function ensureMcComposeFile() {
+  const composeFile = path.join(MC_COMPOSE_DIR, 'docker-compose.yml');
+  if (fs.existsSync(composeFile)) return;
+  const defaultPath = '/app/default-mc-compose.yml';
+  if (!fs.existsSync(defaultPath)) return;
+  fs.mkdirSync(MC_COMPOSE_DIR, { recursive: true });
+  fs.copyFileSync(defaultPath, composeFile);
+  console.log(`Initialized default MC compose at ${composeFile}`);
+}
+
+function ensureRconPassword() {
+  const r = db.prepare('SELECT rcon_password FROM state WHERE id = 1').get();
+  if (r?.rcon_password) return r.rcon_password;
+  const pw = crypto.randomBytes(24).toString('hex');
+  db.prepare('UPDATE state SET rcon_password = ? WHERE id = 1').run(pw);
+  return pw;
+}
+
 function writeEnvFile(settings, seasonName) {
+  ensureMcComposeFile();
+  const rconPassword = ensureRconPassword();
   const lines = SETTING_KEYS.map(k => {
     const value = k === 'OPS' ? mergeOps(settings[k]) : (settings[k] ?? '');
     return `${k}=${value}`;
   });
   lines.unshift(`SEASON_NAME=${seasonName}`);
+  lines.push(`RCON_PASSWORD=${rconPassword}`);
   fs.writeFileSync(path.join(MC_COMPOSE_DIR, '.env'), lines.join('\n') + '\n');
 }
 
@@ -370,5 +397,7 @@ app.get('/api/logs', async (req, res) => {
 });
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+ensureMcComposeFile();
 
 app.listen(PORT, () => console.log(`s23-minecraft manager listening on :${PORT}, compose dir ${MC_COMPOSE_DIR}`));

@@ -51,12 +51,31 @@ function seasonNameFor(seasonId, seasonStartedMs) {
   return `season-${String(seasonId).padStart(3, '0')}-${date}`;
 }
 
+function ensureMcComposeFile() {
+  const composeFile = path.join(MC_COMPOSE_DIR, 'docker-compose.yml');
+  if (fs.existsSync(composeFile)) return;
+  const defaultPath = '/app/default-mc-compose.yml';
+  if (!fs.existsSync(defaultPath)) return;
+  fs.mkdirSync(MC_COMPOSE_DIR, { recursive: true });
+  fs.copyFileSync(defaultPath, composeFile);
+}
+
+function ensureRconPassword() {
+  const r = db.prepare('SELECT rcon_password FROM state WHERE id = 1').get();
+  if (r?.rcon_password) return r.rcon_password;
+  const pw = require('crypto').randomBytes(24).toString('hex');
+  db.prepare('UPDATE state SET rcon_password = ? WHERE id = 1').run(pw);
+  return pw;
+}
+
 function writeEnvFile(settings, seasonName) {
+  ensureMcComposeFile();
   const lines = SETTING_KEYS.map(k => {
     const value = k === 'OPS' ? mergeOps(settings[k]) : (settings[k] ?? '');
     return `${k}=${value}`;
   });
   lines.unshift(`SEASON_NAME=${seasonName}`);
+  lines.push(`RCON_PASSWORD=${ensureRconPassword()}`);
   fs.writeFileSync(path.join(MC_COMPOSE_DIR, '.env'), lines.join('\n') + '\n');
 }
 

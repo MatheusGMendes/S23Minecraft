@@ -11,6 +11,7 @@ WORKDIR /app
 COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY backend/server.js backend/cli.js ./
+COPY examples/minecraft.example.yml /app/default-mc-compose.yml
 COPY --from=frontend /build/dist ./public
 
 RUN chmod +x cli.js && ln -s /app/cli.js /usr/local/bin/s23
