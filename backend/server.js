@@ -58,7 +58,11 @@ if (!cols.includes('extension_days')) {
   db.exec('ALTER TABLE state ADD COLUMN extension_days INTEGER NOT NULL DEFAULT 0');
 }
 if (!cols.includes('season_id')) {
-  db.exec('ALTER TABLE state ADD COLUMN season_id INTEGER NOT NULL DEFAULT 1');
+  // Default 0 means "no season started yet" — the first run hasn't kicked
+  // off the world. Bumps to 1 the first time the user clicks Start or
+  // submits settings. Until then the form is editable so the deployer can
+  // configure version/MOTD/OPS before the season clock starts.
+  db.exec('ALTER TABLE state ADD COLUMN season_id INTEGER NOT NULL DEFAULT 0');
 }
 
 function seasonNameFor(seasonId, seasonStartedMs) {
@@ -69,8 +73,10 @@ function seasonNameFor(seasonId, seasonStartedMs) {
 
 const existing = db.prepare('SELECT settings FROM state WHERE id = 1').get();
 if (!existing) {
-  db.prepare('INSERT INTO state (id, season_started, settings) VALUES (1, ?, ?)')
-    .run(Date.now(), JSON.stringify(DEFAULT_SETTINGS));
+  // Fresh install — sit in firstRun mode (season_id = 0) until the user
+  // actually starts the server.
+  db.prepare('INSERT INTO state (id, season_started, settings, season_id) VALUES (1, 0, ?, 0)')
+    .run(JSON.stringify(DEFAULT_SETTINGS));
 } else {
   const stored = JSON.parse(existing.settings);
   let changed = false;
@@ -84,12 +90,14 @@ if (!existing) {
 
 const getState = () => {
   const r = db.prepare('SELECT season_started, settings, extension_days, season_id FROM state WHERE id = 1').get();
+  const seasonId = r.season_id || 0;
   return {
     seasonStarted: r.season_started,
     settings: JSON.parse(r.settings),
     extensionDays: r.extension_days || 0,
-    seasonId: r.season_id || 1,
-    seasonName: seasonNameFor(r.season_id || 1, r.season_started),
+    seasonId,
+    seasonName: seasonId === 0 ? '' : seasonNameFor(seasonId, r.season_started),
+    firstRun: seasonId === 0,
   };
 };
 
@@ -157,8 +165,20 @@ async function findMc() {
 
 async function startCompose() {
   const s = getState();
-  writeEnvFile(s.settings, s.seasonName);
+  const now = Date.now();
+  // For firstRun, compute season-1 values in memory but DON'T commit to DB
+  // until compose actually succeeds. Otherwise a misconfig (bad
+  // MC_COMPOSE_DIR, missing folder, etc.) would bump the season counter
+  // even though no server actually started.
+  const seasonName = s.firstRun ? seasonNameFor(1, now) : s.seasonName;
+  writeEnvFile(s.settings, seasonName);
   await compose(['up', '-d']);
+  if (s.firstRun) {
+    db.prepare(`
+      UPDATE state SET season_id = 1, season_started = ?, extension_days = 0
+       WHERE id = 1
+    `).run(now);
+  }
 }
 
 async function validateIconUrl(url) {
@@ -185,13 +205,27 @@ async function validateIconUrl(url) {
 }
 
 async function applyNewSeason(newSettings) {
-  // Bring containers down using the OLD season's compose env first.
-  try { await compose(['down']); } catch (e) { console.warn('down warn:', e.message); }
-  // Then rotate to a new season — new folder, new id, fresh timer.
-  startNewSeason(newSettings);
   const s = getState();
-  writeEnvFile(s.settings, s.seasonName);
+  const now = Date.now();
+  const newSeasonId = (s.seasonId || 0) + 1;
+  const seasonName = seasonNameFor(newSeasonId, now);
+
+  // 1. Write the new .env first. If MC_COMPOSE_DIR is misconfigured this
+  //    fails before we touch any running containers or the DB.
+  writeEnvFile(newSettings, seasonName);
+
+  // 2. Stop the old season's containers (compose down, no -v).
+  try { await compose(['down']); } catch (e) { console.warn('down warn:', e.message); }
+
+  // 3. Bring up the new season.
   await compose(['up', '-d']);
+
+  // 4. Only commit the new state to the DB after compose succeeds.
+  db.prepare(`
+    UPDATE state
+       SET settings = ?, season_started = ?, extension_days = 0, season_id = ?
+     WHERE id = 1
+  `).run(JSON.stringify(newSettings), now, newSeasonId);
 }
 
 // ---- Status ---------------------------------------------------------------
@@ -226,15 +260,16 @@ app.get('/api/state', async (_req, res) => {
     const s = getState();
     const mc = await getMcStatus();
     const expiresAt = expiresAtFor(s);
-    const expired = Date.now() >= expiresAt;
+    const expired = !s.firstRun && Date.now() >= expiresAt;
     // Allow extending whenever we're either inside the last-day window OR
-    // already expired — the server keeps running past day 40 either way.
-    const canExtend = expired || (expiresAt - Date.now() <= EXTEND_WINDOW_MS);
+    // already expired — but never on firstRun (no clock to extend yet).
+    const canExtend = !s.firstRun && (expired || (expiresAt - Date.now() <= EXTEND_WINDOW_MS));
     res.json({
       ...mc,
       seasonStarted: s.seasonStarted,
       expiresAt,
       expired,
+      firstRun: s.firstRun,
       lifetimeDays: LIFETIME_DAYS,
       extensionDays: s.extensionDays,
       seasonId: s.seasonId,
@@ -269,7 +304,8 @@ app.post('/api/start', async (_req, res) => {
 app.post('/api/settings', async (req, res) => {
   try {
     const s = getState();
-    if (Date.now() < expiresAtFor(s)) {
+    // Allowed when there's no season yet (firstRun) OR the season has expired.
+    if (!s.firstRun && Date.now() < expiresAtFor(s)) {
       return res.status(403).json({ error: 'season is still active — settings are locked' });
     }
     // Start from CURRENT settings, not defaults — that way any keys the

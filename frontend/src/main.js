@@ -114,15 +114,21 @@ async function refresh() {
   $('start-btn').disabled = false;
 
   // Season — counter keeps growing past day 40 once expired.
-  const totalDays = s.lifetimeDays + (s.extensionDays || 0);
-  const total = totalDays * 86400000;
-  const elapsedMs = Date.now() - s.seasonStarted;
-  const pct = Math.max(0, Math.min(100, (elapsedMs / total) * 100));
-  $('season-bar').style.width = pct + '%';
-  $('season-bar').className = s.expired ? 'expired' : '';
-  $('season-info').textContent = s.expired
-    ? `${fmtElapsed(elapsedMs)} · expired`
-    : `${fmtElapsed(elapsedMs)} · ${fmtCountdown(s.expiresAt - Date.now())}`;
+  if (s.firstRun) {
+    $('season-bar').style.width = '0%';
+    $('season-bar').className = '';
+    $('season-info').textContent = 'No season yet — configure settings then click Start';
+  } else {
+    const totalDays = s.lifetimeDays + (s.extensionDays || 0);
+    const total = totalDays * 86400000;
+    const elapsedMs = Date.now() - s.seasonStarted;
+    const pct = Math.max(0, Math.min(100, (elapsedMs / total) * 100));
+    $('season-bar').style.width = pct + '%';
+    $('season-bar').className = s.expired ? 'expired' : '';
+    $('season-info').textContent = s.expired
+      ? `${fmtElapsed(elapsedMs)} · expired`
+      : `${fmtElapsed(elapsedMs)} · ${fmtCountdown(s.expiresAt - Date.now())}`;
+  }
   $('extend-btn').hidden = !s.canExtend;
   $('extend-btn').textContent = `Extend season by ${s.extendBy || 5} days`;
 

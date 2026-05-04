@@ -68,12 +68,13 @@ async function findMc() {
 
 const getState = () => {
   const r = db.prepare('SELECT season_started, settings, season_id FROM state WHERE id = 1').get();
-  const seasonId = r.season_id || 1;
+  const seasonId = r.season_id || 0;
   return {
     seasonStarted: r.season_started,
     settings: JSON.parse(r.settings),
     seasonId,
-    seasonName: seasonNameFor(seasonId, r.season_started),
+    seasonName: seasonId === 0 ? '' : seasonNameFor(seasonId, r.season_started),
+    firstRun: seasonId === 0,
   };
 };
 
@@ -96,8 +97,17 @@ const cmds = {
 
   async start() {
     const s = getState();
-    writeEnvFile(s.settings, s.seasonName);
+    const now = Date.now();
+    const seasonName = s.firstRun ? seasonNameFor(1, now) : s.seasonName;
+    writeEnvFile(s.settings, seasonName);
     console.log(await compose(['up', '-d']));
+    if (s.firstRun) {
+      db.prepare(`
+        UPDATE state SET season_id = 1, season_started = ?, extension_days = 0
+         WHERE id = 1
+      `).run(now);
+      console.log(`first season started: ${seasonName}`);
+    }
   },
 
   async stop() {
@@ -141,16 +151,20 @@ const cmds = {
   },
 
   async reset() {
+    const s = getState();
+    const now = Date.now();
+    const newSeasonId = (s.seasonId || 0) + 1;
+    const seasonName = seasonNameFor(newSeasonId, now);
+    // Write env first, then down + up. Only commit DB after compose succeeds.
+    writeEnvFile(s.settings, seasonName);
     try { console.log(await compose(['down'])); } catch (e) { console.warn('down warn:', e.message); }
+    console.log(await compose(['up', '-d']));
     db.prepare(`
       UPDATE state
-         SET season_started = ?, extension_days = 0, season_id = season_id + 1
+         SET season_started = ?, extension_days = 0, season_id = ?
        WHERE id = 1
-    `).run(Date.now());
-    const s = getState();
-    writeEnvFile(s.settings, s.seasonName);
-    console.log(await compose(['up', '-d']));
-    console.log(`new season started: #${s.seasonId} (${s.seasonName}). Old data preserved on disk.`);
+    `).run(now, newSeasonId);
+    console.log(`new season started: #${newSeasonId} (${seasonName}). Old data preserved on disk.`);
   },
 
   async restore() {
