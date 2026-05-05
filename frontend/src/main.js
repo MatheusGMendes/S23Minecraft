@@ -114,6 +114,7 @@ async function refresh() {
   $('start-btn').disabled = false;
 
   // Season — counter keeps growing past day 40 once expired.
+  $('season-label').textContent = s.firstRun ? 'Season' : `Season #${s.seasonId}`;
   if (s.firstRun) {
     $('season-bar').style.width = '0%';
     $('season-bar').className = '';

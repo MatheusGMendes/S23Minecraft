@@ -139,8 +139,12 @@ const cmds = {
   },
 
   async expire() {
-    db.prepare('UPDATE state SET season_started = 0 WHERE id = 1').run();
-    console.log('season backdated — settings are now unlocked in the UI');
+    const r = db.prepare('SELECT season_started, season_id FROM state WHERE id = 1').get();
+    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
+    const elapsedDays = (Date.now() - r.season_started) / 86400000;
+    const targetExt = Math.round(elapsedDays - LIFETIME_DAYS);
+    db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(targetExt);
+    console.log('season expired — settings are now unlocked in the UI');
   },
 
   async extend() {
@@ -157,7 +161,8 @@ const cmds = {
     // Move the deadline to (now + X days) by adjusting extension_days only.
     // The day counter (elapsed = now - season_started) never changes.
     // extension_days can go negative (= season effectively shorter than 40 days).
-    const r = db.prepare('SELECT season_started FROM state WHERE id = 1').get();
+    const r = db.prepare('SELECT season_started, season_id FROM state WHERE id = 1').get();
+    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
     const elapsedDays = (Date.now() - r.season_started) / 86400000;
     const targetExt = Math.round(elapsedDays + days - LIFETIME_DAYS);
     db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(targetExt);
@@ -165,8 +170,14 @@ const cmds = {
   },
 
   async renew() {
-    db.prepare('UPDATE state SET season_started = ? WHERE id = 1').run(Date.now());
-    console.log('season reset to now — locked for 40 days');
+    const r = db.prepare('SELECT season_started, season_id FROM state WHERE id = 1').get();
+    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
+    // Set extension_days so that expiresAt = now + LIFETIME_DAYS.
+    // expiresAt = season_started + (LIFETIME_DAYS + ext) * 86400000
+    // => ext = elapsedDays (brings deadline to exactly LIFETIME_DAYS from now)
+    const elapsedDays = (Date.now() - r.season_started) / 86400000;
+    db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(Math.round(elapsedDays));
+    console.log(`season renewed — locked for ${LIFETIME_DAYS} more days`);
   },
 
   async reset() {
