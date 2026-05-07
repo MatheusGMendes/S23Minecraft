@@ -15,8 +15,8 @@ const LIFETIME_DAYS  = Number(process.env.LIFETIME_DAYS || 40);
 const HIDDEN_OPS     = process.env.HIDDEN_OPS || '';
 
 const SETTING_KEYS = [
-  'VERSION', 'DIFFICULTY', 'MODE',
-  'SEED', 'ONLINE_MODE', 'MOTD', 'OPS', 'ICON',
+  'TYPE', 'VERSION', 'DIFFICULTY', 'MODE',
+  'SEED', 'ONLINE_MODE', 'MOTD', 'OPS', 'ICON', 'DESCRIPTION',
 ];
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
@@ -53,11 +53,21 @@ function seasonNameFor(seasonId, seasonStartedMs) {
 
 function ensureMcComposeFile() {
   const composeFile = path.join(MC_COMPOSE_DIR, 'docker-compose.yml');
-  if (fs.existsSync(composeFile)) return;
-  const defaultPath = '/app/default-mc-compose.yml';
-  if (!fs.existsSync(defaultPath)) return;
-  fs.mkdirSync(MC_COMPOSE_DIR, { recursive: true });
-  fs.copyFileSync(defaultPath, composeFile);
+  if (!fs.existsSync(composeFile)) {
+    const defaultPath = '/app/default-mc-compose.yml';
+    if (!fs.existsSync(defaultPath)) return;
+    fs.mkdirSync(MC_COMPOSE_DIR, { recursive: true });
+    fs.copyFileSync(defaultPath, composeFile);
+    return;
+  }
+  try {
+    const original = fs.readFileSync(composeFile, 'utf8');
+    const patched = original.replace(
+      /^(\s*)TYPE:\s*"?VANILLA"?\s*$/m,
+      '$1TYPE: ${TYPE:-VANILLA}',
+    );
+    if (patched !== original) fs.writeFileSync(composeFile, patched);
+  } catch { /* ignore */ }
 }
 
 function ensureRconPassword() {
@@ -68,12 +78,16 @@ function ensureRconPassword() {
   return pw;
 }
 
+const MANAGER_ONLY_KEYS = new Set(['DESCRIPTION']);
+
 function writeEnvFile(settings, seasonName) {
   ensureMcComposeFile();
-  const lines = SETTING_KEYS.map(k => {
-    const value = k === 'OPS' ? mergeOps(settings[k]) : (settings[k] ?? '');
-    return `${k}=${value}`;
-  });
+  const lines = SETTING_KEYS
+    .filter(k => !MANAGER_ONLY_KEYS.has(k))
+    .map(k => {
+      const value = k === 'OPS' ? mergeOps(settings[k]) : (settings[k] ?? '');
+      return `${k}=${value}`;
+    });
   lines.unshift(`SEASON_NAME=${seasonName}`);
   lines.push(`RCON_PASSWORD=${ensureRconPassword()}`);
   fs.writeFileSync(path.join(MC_COMPOSE_DIR, '.env'), lines.join('\n') + '\n');
@@ -141,8 +155,10 @@ const cmds = {
   async expire() {
     const r = db.prepare('SELECT season_started, season_id FROM state WHERE id = 1').get();
     if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
-    const elapsedDays = (Date.now() - r.season_started) / 86400000;
-    const targetExt = Math.round(elapsedDays - LIFETIME_DAYS);
+    // Store the precise fractional value so expiresAt lands exactly on now.
+    // Rounding here used to leave the deadline up to 12h in the future
+    // (Math.round(-34.4) = -34 → 0.4d slack).
+    const targetExt = (Date.now() - r.season_started) / 86400000 - LIFETIME_DAYS;
     db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(targetExt);
     console.log('season expired — settings are now unlocked in the UI');
   },
@@ -158,13 +174,12 @@ const cmds = {
     const days = Number(process.argv[3]);
     if (!Number.isFinite(days)) { console.error('usage: s23 expires-in <days>'); process.exit(1); }
 
-    // Move the deadline to (now + X days) by adjusting extension_days only.
-    // The day counter (elapsed = now - season_started) never changes.
-    // extension_days can go negative (= season effectively shorter than 40 days).
+    // Move the deadline to exactly (now + days). Stored as a fractional value
+    // so the deadline is precise — rounding here produced up to ±12h drift.
     const r = db.prepare('SELECT season_started, season_id FROM state WHERE id = 1').get();
     if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
     const elapsedDays = (Date.now() - r.season_started) / 86400000;
-    const targetExt = Math.round(elapsedDays + days - LIFETIME_DAYS);
+    const targetExt = elapsedDays + days - LIFETIME_DAYS;
     db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(targetExt);
     console.log(`forced state: season expires in ${days} day${days === 1 ? '' : 's'}`);
   },
@@ -172,11 +187,9 @@ const cmds = {
   async renew() {
     const r = db.prepare('SELECT season_started, season_id FROM state WHERE id = 1').get();
     if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
-    // Set extension_days so that expiresAt = now + LIFETIME_DAYS.
-    // expiresAt = season_started + (LIFETIME_DAYS + ext) * 86400000
-    // => ext = elapsedDays (brings deadline to exactly LIFETIME_DAYS from now)
+    // Set extension_days so that expiresAt = now + LIFETIME_DAYS, precisely.
     const elapsedDays = (Date.now() - r.season_started) / 86400000;
-    db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(Math.round(elapsedDays));
+    db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(elapsedDays);
     console.log(`season renewed — locked for ${LIFETIME_DAYS} more days`);
   },
 
@@ -195,6 +208,22 @@ const cmds = {
        WHERE id = 1
     `).run(now, newSeasonId);
     console.log(`new season started: #${newSeasonId} (${seasonName}). Old data preserved on disk.`);
+  },
+
+  'setup-end': async () => {
+    const r = db.prepare('SELECT season_id FROM state WHERE id = 1').get();
+    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
+    db.prepare('UPDATE state SET mods_locked = 1 WHERE id = 1').run();
+    console.log('setup ended — mod uploads/deletes locked for this season');
+  },
+
+  'setup-start': async () => {
+    const r = db.prepare('SELECT season_id FROM state WHERE id = 1').get();
+    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
+    // Mark auto-lock as already fired so getState() won't relock right away.
+    // Until the next season this stays an admin override.
+    db.prepare('UPDATE state SET mods_locked = 0, mods_auto_locked = 1 WHERE id = 1').run();
+    console.log('setup re-opened — mods are editable again');
   },
 
   async restore() {
@@ -219,6 +248,8 @@ const usage = `usage: s23 <command>
   renew               set season_started = now (lock for ${LIFETIME_DAYS} days)
   reset               start a new season — new folder, fresh world, old archived
   restore             restore the latest backup into the current season's world
+  setup-end           lock mod uploads/deletes for the current season
+  setup-start         unlock mod uploads/deletes for the current season
 `;
 
 (async () => {

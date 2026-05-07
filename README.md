@@ -9,8 +9,8 @@ plain `docker-compose.yml` they write themselves.
   past 40. Anyone can either click **Extend** (add 5 days) or submit new
   settings, which starts a new season with a fresh world.
 - **Per-season folders** — each new season writes to its own host folder
-  (`<HDD>/seasons/season-NNN-YYYYMMDD`) so old seasons stay on disk as
-  archives. Same for backups (`<BACKUP>/seasons/season-NNN-YYYYMMDD`).
+  (`<SERVERS_DIR>/season-NNN-YYYYMMDD`) so old seasons stay on disk as
+  archives. Same for backups (`<BACKUPS_DIR>/season-NNN-YYYYMMDD`).
 - **Automated backups** — `itzg/mc-backup` runs alongside the server, takes
   RCON-flushed snapshots every 12 h, prunes after 3 days, pauses when no
   players are online.
@@ -106,12 +106,14 @@ docker exec s23-minecraft-manager s23 <command>
 | `status` | print current state, settings, and expiry timestamps |
 | `start` | `docker compose up -d` |
 | `stop` | `docker compose stop` (does not remove anything) |
-| `expire` | backdate `season_started = 0` so settings unlock immediately |
+| `expire` | set `extension_days` so the season's deadline lands at-or-before now — settings unlock in the UI without touching `season_started` |
 | `extend [days]` | add days to current season — default `5`, no last-day check |
 | `expires-in <days>` | force the season to expire `<days>` from now (testing) |
-| `renew` | reset `season_started = now` (lock for 40 days) |
+| `renew` | bring the deadline back to `now + LIFETIME_DAYS` (lock for 40 more days) |
 | `reset` | start a new season (new folder, fresh world); old season's data stays as an archive |
 | `restore` | run `restore-tar-backup` against the current season's latest backup |
+| `setup-end` | lock mod uploads/deletes/restart for the current season — same effect as the 24 h auto-lock or the **End setup** button |
+| `setup-start` | re-open mod editing for the current season — admin override that prevents the 24 h auto-lock from re-firing |
 
 Examples:
 
@@ -119,7 +121,22 @@ Examples:
 docker exec s23-minecraft-manager s23 expires-in 1   # last-day window for testing extend
 docker exec s23-minecraft-manager s23 extend 30      # +30 days, override
 docker exec s23-minecraft-manager s23 reset          # nuke everything, fresh season
+docker exec s23-minecraft-manager s23 setup-start    # let players upload mods past day 1
+docker exec s23-minecraft-manager s23 setup-end      # freeze the modset early
 ```
+
+### Mod uploads (FORGE / FABRIC seasons)
+
+When a non-vanilla season starts, the **Mods** card shows up in the Logs tab
+for 24 hours. Players can drop `.jar` files in, see what's installed, and
+hit **Restart server to load mods** to recreate the MC container. After the
+window closes (or after `s23 setup-end`), the modset is frozen for the rest
+of the season — uploads, deletes, and the restart button are all rejected
+with a 403 until you start a new season or run `s23 setup-start`.
+
+Files travel through the docker socket (`putArchive` to drop them into
+`/data/mods`, `exec` for list/delete) — no shared bind mount required
+between the manager and MC.
 
 ## Configuration
 
@@ -135,8 +152,8 @@ All knobs are env vars on the **manager container** in
 | `LIFETIME_DAYS` | `40` | Length of a season |
 | `EXTEND_DAYS` | `5` | How many days `/api/extend` adds |
 | `HIDDEN_OPS` | empty | Comma-separated usernames always merged into the op list. Never shown in the UI. |
-| `HDD` | `/srv/minecraft` | Host base path for season worlds (`<HDD>/seasons/<season-name>`) |
-| `BACKUP` | `/srv/minecraft-backups` | Host base path for backup archives (`<BACKUP>/seasons/<season-name>`) |
+| `SERVERS_DIR` | `/srv/minecraft/seasons` | Host folder that holds one subfolder per season's world (`<SERVERS_DIR>/<season-name>`) |
+| `BACKUPS_DIR` | `/srv/minecraft-backups` | Host folder that holds one subfolder per season's backups (`<BACKUPS_DIR>/<season-name>`) |
 
 ## Updating from main
 

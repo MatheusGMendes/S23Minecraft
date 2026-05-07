@@ -23,6 +23,7 @@
       </div>
       <div class="players-list" id="players-list" hidden></div>
       <div class="motd-line" id="motd-line"></div>
+      <div class="description-line" id="description-line" hidden></div>
       <div class="connect-line" id="connect-line"></div>
       <div class="actions" id="start-actions">
         <button id="start-btn" type="button">Start server</button>
@@ -51,6 +52,24 @@
     </div>
 
     <div class="tab-panel" data-tab="logs">
+      <section class="settings-card mods-card" id="mods-card" hidden>
+        <h2>Mods</h2>
+        <p class="muted" id="mods-blurb">Upload mod jars while the setup window is open.</p>
+        <div class="mods-uploader" id="mods-edit-row">
+          <input id="mods-input" type="file" accept=".jar" multiple hidden />
+          <label for="mods-input" class="mods-pick">
+            <span id="mods-pick-label">Choose .jar files</span>
+          </label>
+          <button id="mods-upload-btn" type="button" disabled>Upload</button>
+        </div>
+        <ul id="mods-list" class="mods-list"></ul>
+        <button id="mods-apply-btn" type="button" class="extend-btn" hidden>
+          Restart server to load mods
+        </button>
+        <button id="mods-end-btn" type="button" class="extend-btn">
+          End setup &amp; lock mods
+        </button>
+      </section>
       <section class="logs-card">
         <div class="logs-header">
           <h2>Server logs</h2>

@@ -6,3 +6,4 @@ data
 
 # Local test mount + the .env the manager writes — not for the repo.
 /minecraft/
+.env
