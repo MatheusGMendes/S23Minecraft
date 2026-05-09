@@ -23,7 +23,12 @@ services:
     mem_limit: "11g"
     cpus: 4
     tmpfs:
-      - /tmp:size=512m,mode=1777
+      # `exec` is critical: docker's tmpfs short-form mounts noexec by
+      # default, which breaks itzg's mc-image-helper — netty extracts a
+      # native epoll lib to /tmp and the noexec blocks it, the warning
+      # leaks into stdout, and itzg's version-resolution capture parses
+      # the garbled output as a missing manifest entry.
+      - /tmp:size=512m,mode=1777,exec
 
     ports:
       - "25565:25565"
