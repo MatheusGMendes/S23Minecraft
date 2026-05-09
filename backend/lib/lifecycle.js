@@ -24,6 +24,11 @@ async function startCompose() {
   writeEnvFile(s.settings, seasonName, { setupMode });
   await forceRemoveByName(MC_CONTAINER);
   await forceRemoveByName(`${MC_CONTAINER}-backups`);
+  // Pull itzg images first so a stale `:latest` cached on the host
+  // can't quietly hand us an MC binary too old to recognize a freshly-
+  // released `LATEST`. Best-effort — falls back to cached image offline.
+  try { await compose(['pull']); }
+  catch (e) { console.warn('image pull warn:', e.message); }
   await compose(['up', '-d']);
   if (s.firstRun) {
     db.prepare(`
@@ -75,6 +80,12 @@ async function applyNewSeason(newSettings) {
   //     project left orphan containers under the same name.
   await forceRemoveByName(MC_CONTAINER);
   await forceRemoveByName(`${MC_CONTAINER}-backups`);
+
+  // 2c. Pull fresh itzg images. If a new MC release dropped, the user
+  //     probably picked it on the form — a stale `:latest` here would
+  //     fail to provision the new version.
+  try { await compose(['pull']); }
+  catch (e) { console.warn('image pull warn:', e.message); }
 
   // 3. Bring up the new season.
   await compose(['up', '-d']);
