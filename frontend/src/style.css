@@ -200,17 +200,6 @@ button:disabled {
   cursor: not-allowed;
 }
 
-#start-btn {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-}
-
-#start-btn:hover:not(:disabled) {
-  filter: brightness(1.1);
-  color: white;
-}
-
 /* ---------- Season ---------- */
 
 .season-row {
@@ -337,31 +326,17 @@ button:disabled {
   color: var(--text);
 }
 
+.mods-pick.busy {
+  border-color: var(--accent);
+  color: var(--accent);
+  cursor: wait;
+  pointer-events: none;
+}
+
 .mods-pick > span {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.mods-uploader button {
-  width: auto;
-  padding: 9px 18px;
-  font-size: 0.85rem;
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-}
-
-.mods-uploader button:hover:not(:disabled) {
-  filter: brightness(1.1);
-  color: white;
-  border-color: var(--accent);
-}
-
-.mods-uploader button:disabled {
-  background: var(--panel-2);
-  color: var(--muted);
-  border-color: var(--border);
 }
 
 .mods-list {
@@ -402,6 +377,36 @@ button:disabled {
   text-decoration-color: var(--error);
 }
 
+.mods-item.mods-item-upload {
+  border-color: var(--accent);
+  background: rgba(255, 102, 0, 0.06);
+}
+
+.mods-item.mods-item-upload .mods-meta {
+  color: var(--accent);
+}
+
+.mods-discard-btn {
+  margin-top: 8px;
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: inherit;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.mods-discard-btn:hover:not(:disabled) {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.mods-discard-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .mods-name {
   flex: 1;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -425,8 +430,44 @@ button:disabled {
   color: var(--error);
 }
 
-#mods-apply-btn {
+.mods-apply-row {
   margin-top: 14px;
+}
+
+.mods-apply-hint:empty { display: none; }
+.mods-apply-hint {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+#mods-blurb {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mods-wipe-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text);
+  margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mods-wipe-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+#mods-apply-btn {
+  width: 100%;
 }
 
 /* ---------- Settings ---------- */
@@ -472,8 +513,208 @@ button:disabled {
   margin-top: 14px;
 }
 
+/* ---------- Past seasons ---------- */
+
+.seasons-card h2 {
+  margin-bottom: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.seasons-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.seasons-item {
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.seasons-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.seasons-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.seasons-ver {
+  font-size: 0.85rem;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.seasons-ver-muted { color: var(--muted); font-style: italic; }
+
+.seasons-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.seasons-download {
+  align-self: flex-start;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.seasons-download:hover {
+  border-color: var(--accent);
+  filter: brightness(1.1);
+}
+
+.seasons-nobackup {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.seasons-more-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.seasons-more-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 @media (max-width: 520px) {
   .container { padding: 32px 16px; }
   .grid { grid-template-columns: 1fr; }
   .season-row { grid-template-columns: 1fr; gap: 8px; }
+}
+
+/* ---------- Modal (replaces native alert/confirm) ---------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: modal-fade 0.12s ease-out;
+}
+
+/* Higher specificity than `.modal { display: flex }` so the [hidden]
+   attribute actually hides the modal. Without this rule the modal is
+   visible on every page load (since the HTML ships with `hidden` but
+   the display:flex above wins source-order against UA `[hidden]`). */
+.modal[hidden] { display: none; }
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+.modal-dialog {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  animation: modal-rise 0.15s ease-out;
+}
+
+.modal-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.modal-title:empty { display: none; }
+
+.modal-body {
+  font-size: 0.92rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.modal-actions button {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  min-width: 80px;
+}
+
+.modal-actions button:hover { background: var(--border); }
+
+.modal-actions .modal-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.modal-actions .modal-btn-primary:hover { filter: brightness(1.1); }
+
+.modal-actions .modal-btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #ef4444;
+}
+.modal-actions .modal-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.7);
+}
+
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modal-rise {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
 }

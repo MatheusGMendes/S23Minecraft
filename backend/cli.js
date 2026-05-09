@@ -1,166 +1,66 @@
 #!/usr/bin/env node
-// Admin CLI for the manager. Talks to the same compose dir and SQLite DB
-// as server.js. Run via: docker exec s23-minecraft-manager s23 <command>
+// Admin CLI for the manager. Shares the same DB + helpers as the HTTP
+// server (lib/*). Run via: docker exec s23-minecraft-manager s23 <cmd>
 
-const path = require('path');
-const fs = require('fs');
-const { execFile } = require('child_process');
-const Docker = require('dockerode');
-const Database = require('better-sqlite3');
-
-const DATA_DIR       = process.env.DATA_DIR       || path.join(__dirname, 'data');
-const MC_COMPOSE_DIR = process.env.MC_COMPOSE_DIR || '/mc';
-const MC_CONTAINER   = process.env.MC_CONTAINER   || 's23-minecraft';
-const LIFETIME_DAYS  = Number(process.env.LIFETIME_DAYS || 40);
-const HIDDEN_OPS     = process.env.HIDDEN_OPS || '';
-
-const SETTING_KEYS = [
-  'TYPE', 'VERSION', 'DIFFICULTY', 'MODE',
-  'SEED', 'ONLINE_MODE', 'MOTD', 'OPS', 'ICON', 'DESCRIPTION',
-];
-
-const docker = new Docker({ socketPath: '/var/run/docker.sock' });
-const db = new Database(path.join(DATA_DIR, 'state.db'));
-
-function compose(args) {
-  return new Promise((resolve, reject) => {
-    execFile('docker', ['compose', ...args], { cwd: MC_COMPOSE_DIR }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(stderr.trim() || err.message));
-      resolve(stdout);
-    });
-  });
-}
-
-function mergeOps(playerInput) {
-  const all = [HIDDEN_OPS, playerInput]
-    .flatMap(s => String(s || '').split(','))
-    .map(s => s.trim())
-    .filter(Boolean);
-  const seen = new Set();
-  const out = [];
-  for (const name of all) {
-    const key = name.toLowerCase();
-    if (!seen.has(key)) { seen.add(key); out.push(name); }
-  }
-  return out.join(',');
-}
-
-function seasonNameFor(seasonId, seasonStartedMs) {
-  const d = new Date(seasonStartedMs);
-  const date = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
-  return `season-${String(seasonId).padStart(3, '0')}-${date}`;
-}
-
-function ensureMcComposeFile() {
-  const composeFile = path.join(MC_COMPOSE_DIR, 'docker-compose.yml');
-  if (!fs.existsSync(composeFile)) {
-    const defaultPath = '/app/default-mc-compose.yml';
-    if (!fs.existsSync(defaultPath)) return;
-    fs.mkdirSync(MC_COMPOSE_DIR, { recursive: true });
-    fs.copyFileSync(defaultPath, composeFile);
-    return;
-  }
-  try {
-    const original = fs.readFileSync(composeFile, 'utf8');
-    const patched = original.replace(
-      /^(\s*)TYPE:\s*"?VANILLA"?\s*$/m,
-      '$1TYPE: ${TYPE:-VANILLA}',
-    );
-    if (patched !== original) fs.writeFileSync(composeFile, patched);
-  } catch { /* ignore */ }
-}
-
-function ensureRconPassword() {
-  const r = db.prepare('SELECT rcon_password FROM state WHERE id = 1').get();
-  if (r?.rcon_password) return r.rcon_password;
-  const pw = require('crypto').randomBytes(24).toString('hex');
-  db.prepare('UPDATE state SET rcon_password = ? WHERE id = 1').run(pw);
-  return pw;
-}
-
-const MANAGER_ONLY_KEYS = new Set(['DESCRIPTION']);
-
-function writeEnvFile(settings, seasonName) {
-  ensureMcComposeFile();
-  const lines = SETTING_KEYS
-    .filter(k => !MANAGER_ONLY_KEYS.has(k))
-    .map(k => {
-      const value = k === 'OPS' ? mergeOps(settings[k]) : (settings[k] ?? '');
-      return `${k}=${value}`;
-    });
-  lines.unshift(`SEASON_NAME=${seasonName}`);
-  lines.push(`RCON_PASSWORD=${ensureRconPassword()}`);
-  fs.writeFileSync(path.join(MC_COMPOSE_DIR, '.env'), lines.join('\n') + '\n');
-}
-
-async function findMc() {
-  const list = await docker.listContainers({ all: true });
-  const c = list.find(c => c.Names.some(n => n === '/' + MC_CONTAINER));
-  return c ? docker.getContainer(c.Id) : null;
-}
-
-const getState = () => {
-  const r = db.prepare('SELECT season_started, settings, season_id FROM state WHERE id = 1').get();
-  const seasonId = r.season_id || 0;
-  return {
-    seasonStarted: r.season_started,
-    settings: JSON.parse(r.settings),
-    seasonId,
-    seasonName: seasonId === 0 ? '' : seasonNameFor(seasonId, r.season_started),
-    firstRun: seasonId === 0,
-  };
-};
+const { LIFETIME_DAYS, MC_COMPOSE_DIR } = require('./lib/config');
+const {
+  db, getState, isExpiredFor, isSetupModeFor,
+} = require('./lib/db');
+const { compose } = require('./lib/docker');
+const { writeEnvFile } = require('./lib/envfile');
+const {
+  startCompose, applyNewSeason,
+} = require('./lib/lifecycle');
 
 const cmds = {
   async status() {
     const s = getState();
+    const { findMc } = require('./lib/docker');
     const c = await findMc();
     let running = false;
     if (c) running = (await c.inspect()).State.Running;
-    const expiresAt = new Date(s.seasonStarted + 40 * 86400 * 1000);
+    const expiresAt = new Date(s.seasonStarted + (LIFETIME_DAYS + s.extensionDays) * 86400 * 1000);
     console.log(`compose dir:    ${MC_COMPOSE_DIR}`);
     console.log(`season:         #${s.seasonId} (${s.seasonName})`);
-    console.log(`container:      ${c ? MC_CONTAINER : '(none)'}`);
+    console.log(`container:      ${c ? (process.env.MC_CONTAINER || 's23-minecraft') : '(none)'}`);
     console.log(`running:        ${running}`);
     console.log(`season started: ${new Date(s.seasonStarted).toISOString()}`);
     console.log(`season expires: ${expiresAt.toISOString()}`);
-    console.log(`expired:        ${Date.now() >= expiresAt.getTime()}`);
+    console.log(`expired:        ${isExpiredFor(s)}`);
     console.log(`settings:       ${JSON.stringify(s.settings, null, 2)}`);
   },
 
-  async start() {
-    const s = getState();
-    const now = Date.now();
-    const seasonName = s.firstRun ? seasonNameFor(1, now) : s.seasonName;
-    writeEnvFile(s.settings, seasonName);
-    console.log(await compose(['up', '-d']));
-    if (s.firstRun) {
-      db.prepare(`
-        UPDATE state SET season_id = 1, season_started = ?, extension_days = 0
-         WHERE id = 1
-      `).run(now);
-      console.log(`first season started: ${seasonName}`);
-    }
-  },
+  async start() { await startCompose(); console.log('started'); },
 
   async stop() {
-    try {
-      console.log(await compose(['stop']));
-    } catch (e) {
-      console.error(e.message);
-      process.exit(1);
-    }
+    try { console.log(await compose(['stop'])); }
+    catch (e) { console.error(e.message); process.exit(1); }
   },
 
   async expire() {
-    const r = db.prepare('SELECT season_started, season_id FROM state WHERE id = 1').get();
-    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
-    // Store the precise fractional value so expiresAt lands exactly on now.
-    // Rounding here used to leave the deadline up to 12h in the future
-    // (Math.round(-34.4) = -34 → 0.4d slack).
-    const targetExt = (Date.now() - r.season_started) / 86400000 - LIFETIME_DAYS;
-    db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(targetExt);
-    console.log('season expired — settings are now unlocked in the UI');
+    const s = getState();
+    if (s.firstRun) { console.error('no season started yet'); process.exit(1); }
+
+    // Flip expiry first: extension_days lands exactly on now (precise
+    // fractional value, no Math.round drift).
+    const targetExt = (Date.now() - s.seasonStarted) / 86400000 - LIFETIME_DAYS;
+    db.prepare(`
+      UPDATE state SET extension_days = ?, mods_locked = 1, mods_auto_locked = 1
+       WHERE id = 1
+    `).run(targetExt);
+
+    // Reconcile: if the .env was in setup mode (mid-window or stale from
+    // a previously-crashed auto-lock restart), rewrite without setup
+    // mode and bounce MC. Otherwise leave MC running.
+    const after = getState();
+    const r = db.prepare('SELECT env_setup_mode FROM state WHERE id = 1').get();
+    if (r.env_setup_mode) {
+      console.log('reconciling: dropping setup-mode .env and restarting MC…');
+      writeEnvFile(after.settings, after.seasonName, { setupMode: false });
+      try { console.log(await compose(['stop', 'minecraft'])); } catch (e) { console.warn('stop warn:', e.message); }
+      console.log(await compose(['up', '-d', 'minecraft']));
+    }
+    console.log('season expired — settings unlocked, players can join');
   },
 
   async extend() {
@@ -173,65 +73,61 @@ const cmds = {
   'expires-in': async () => {
     const days = Number(process.argv[3]);
     if (!Number.isFinite(days)) { console.error('usage: s23 expires-in <days>'); process.exit(1); }
-
-    // Move the deadline to exactly (now + days). Stored as a fractional value
-    // so the deadline is precise — rounding here produced up to ±12h drift.
-    const r = db.prepare('SELECT season_started, season_id FROM state WHERE id = 1').get();
-    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
-    const elapsedDays = (Date.now() - r.season_started) / 86400000;
+    const s = getState();
+    if (s.firstRun) { console.error('no season started yet'); process.exit(1); }
+    // Move the deadline to exactly (now + days). Stored as a fractional
+    // value so the deadline is precise — rounding here produced up to
+    // ±12h drift in the past.
+    const elapsedDays = (Date.now() - s.seasonStarted) / 86400000;
     const targetExt = elapsedDays + days - LIFETIME_DAYS;
     db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(targetExt);
     console.log(`forced state: season expires in ${days} day${days === 1 ? '' : 's'}`);
   },
 
   async renew() {
-    const r = db.prepare('SELECT season_started, season_id FROM state WHERE id = 1').get();
-    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
-    // Set extension_days so that expiresAt = now + LIFETIME_DAYS, precisely.
-    const elapsedDays = (Date.now() - r.season_started) / 86400000;
+    const s = getState();
+    if (s.firstRun) { console.error('no season started yet'); process.exit(1); }
+    const elapsedDays = (Date.now() - s.seasonStarted) / 86400000;
     db.prepare('UPDATE state SET extension_days = ? WHERE id = 1').run(elapsedDays);
     console.log(`season renewed — locked for ${LIFETIME_DAYS} more days`);
   },
 
   async reset() {
     const s = getState();
-    const now = Date.now();
-    const newSeasonId = (s.seasonId || 0) + 1;
-    const seasonName = seasonNameFor(newSeasonId, now);
-    // Write env first, then down + up. Only commit DB after compose succeeds.
-    writeEnvFile(s.settings, seasonName);
-    try { console.log(await compose(['down'])); } catch (e) { console.warn('down warn:', e.message); }
-    console.log(await compose(['up', '-d']));
-    db.prepare(`
-      UPDATE state
-         SET season_started = ?, extension_days = 0, season_id = ?
-       WHERE id = 1
-    `).run(now, newSeasonId);
-    console.log(`new season started: #${newSeasonId} (${seasonName}). Old data preserved on disk.`);
+    await applyNewSeason(s.settings);
+    console.log('new season started.');
   },
 
   'setup-end': async () => {
-    const r = db.prepare('SELECT season_id FROM state WHERE id = 1').get();
-    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
-    db.prepare('UPDATE state SET mods_locked = 1 WHERE id = 1').run();
-    console.log('setup ended — mod uploads/deletes locked for this season');
+    const s = getState();
+    if (s.firstRun) { console.error('no season started yet'); process.exit(1); }
+    db.prepare('UPDATE state SET mods_locked = 1, mods_auto_locked = 1 WHERE id = 1').run();
+    const after = getState();
+    writeEnvFile(after.settings, after.seasonName, { setupMode: false });
+    try { console.log(await compose(['stop', 'minecraft'])); } catch (e) { console.warn('stop warn:', e.message); }
+    console.log(await compose(['up', '-d', 'minecraft']));
+    console.log('setup ended — mod uploads locked, whitelist dropped, players can join');
   },
 
   'setup-start': async () => {
-    const r = db.prepare('SELECT season_id FROM state WHERE id = 1').get();
-    if (!r.season_id) { console.error('no season started yet'); process.exit(1); }
-    // Mark auto-lock as already fired so getState() won't relock right away.
-    // Until the next season this stays an admin override.
+    const s = getState();
+    if (s.firstRun) { console.error('no season started yet'); process.exit(1); }
+    if ((s.settings?.TYPE || 'VANILLA') === 'VANILLA') {
+      console.error('vanilla seasons do not have a mod setup window'); process.exit(1);
+    }
     db.prepare('UPDATE state SET mods_locked = 0, mods_auto_locked = 1 WHERE id = 1').run();
-    console.log('setup re-opened — mods are editable again');
+    const after = getState();
+    writeEnvFile(after.settings, after.seasonName, { setupMode: true });
+    try { console.log(await compose(['stop', 'minecraft'])); } catch (e) { console.warn('stop warn:', e.message); }
+    console.log(await compose(['up', '-d', 'minecraft']));
+    console.log('setup re-opened — mods are editable again, whitelist re-enabled');
+    console.log('subsequent reloads PRESERVE the world by default');
   },
 
   async restore() {
     console.log('Running restore-tar-backup against the latest archive…');
-    try {
-      console.log(await compose(['stop', 'minecraft']));
-    } catch (e) { console.warn('stop minecraft warn:', e.message); }
-    console.log(await compose(['run', '--rm', 'restore-backup']));
+    try { console.log(await compose(['stop', 'minecraft'])); } catch (e) { console.warn('stop minecraft warn:', e.message); }
+    console.log(await compose(['--profile', 'manual', 'run', '--rm', 'restore-backup']));
     console.log(await compose(['up', '-d']));
     console.log('Restore complete.');
   },

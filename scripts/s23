@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# s23 — admin CLI wrapper. Runs the bundled cli.js inside the manager
+# container on the host docker daemon (OrbStack). Same form as the
+# original docker-exec invocation documented in README.
+
+set -euo pipefail
+exec docker exec s23-minecraft-manager s23 "$@"

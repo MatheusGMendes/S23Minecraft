@@ -1,101 +1,133 @@
 # S23 Minecraft
 
 Tiny manager for a community-shared Minecraft server. Players control a few
-gameplay knobs from a web UI; the host operator controls the rest from a
-plain `docker-compose.yml` they write themselves.
+gameplay knobs from a web UI; the host operator owns a plain
+`<project>.yml` for MC and the manager just edits `.env` and bounces
+`docker compose` against it.
 
-- **40-day seasons** — settings are locked while the season is active.
-  When it ends, the server **keeps running** and the day counter keeps going
-  past 40. Anyone can either click **Extend** (add 5 days) or submit new
-  settings, which starts a new season with a fresh world.
-- **Per-season folders** — each new season writes to its own host folder
-  (`<SERVERS_DIR>/season-NNN-YYYYMMDD`) so old seasons stay on disk as
-  archives. Same for backups (`<BACKUPS_DIR>/season-NNN-YYYYMMDD`).
-- **Automated backups** — `itzg/mc-backup` runs alongside the server, takes
-  RCON-flushed snapshots every 12 h, prunes after 3 days, pauses when no
-  players are online.
-- **One-click restore** — `s23 restore` runs the `restore-tar-backup`
-  service to roll back to the latest archive.
-- **No magic** — the manager just edits a `.env` file and runs
-  `docker compose up -d` against your file. You own the compose.
+## What it does
+
+- **40-day seasons.** Settings are locked while a season is active. When
+  it expires, anyone can click **Extend** (+5 days) or fill the form to
+  start a new season — fresh world, new folder. Past seasons stay on
+  disk as archives.
+- **Per-season folders.** Each season writes to its own host folder
+  (`<SERVERS_DIR>/season-NNN-YYYYMMDD/`). Same for backups
+  (`<BACKUPS_DIR>/season-NNN-YYYYMMDD/`). Nothing is ever wiped
+  silently — only an explicit "Reset world" toggle on reload, or the
+  next season's start, replaces world data.
+- **Automated backups.** `itzg/mc-backup` runs alongside the server
+  inside the MC stack. RCON-flushed `tar /data` every 12 h, prunes
+  after 3 days, pauses while no players are online. Plus a one-shot
+  `backup-now` that fires on every season transition before the old
+  server stops.
+- **Past seasons UI.** The Server tab lists archived seasons with their
+  TYPE / VERSION and a **Download backup** link that streams the most
+  recent tar from `<BACKUPS_DIR>/<season>/`.
+- **Mod-setup window** (FORGE / FABRIC seasons). For the first 24 h
+  after a non-vanilla season starts, the manager runs MC behind an
+  empty whitelist (`[SETUP]` MOTD prefix) so players can't join.
+  Operator queues `.jar` uploads in the browser, picks each file's
+  fate, then hits Apply — that uploads, optionally wipes world for
+  worldgen-affecting mods, and restarts MC. Window closes after 24 h
+  or `s23 setup-end`.
+- **Restore.** `s23 restore` runs `restore-tar-backup` against the
+  current season's latest archive.
+- **No magic.** The manager just writes `<project>.env`, runs
+  `docker compose up -d` against `<project>.yml`, and exposes a small
+  HTTP/JSON API. You own the compose.
 
 ## Architecture
 
 ```
-your host
-├── /var/run/docker.sock
-├── /srv/s23-minecraft/docker-compose.yml   ← YOU WRITE THIS
-├── /srv/s23-minecraft/.env                 ← managed by the app
-└── docker compose
-    ├── s23-minecraft-manager (this image)  ← UI on :8092
-    └── s23-minecraft         (itzg image)  ← MC on :25565
+host docker daemon
+├── s23-minecraft-manager      ← UI on :3002, this image
+│      reads/writes <project>/<project>.env
+│      mounts /var/run/docker.sock to control the MC stack
+│
+└── MC stack (separate compose project, lives in <project>/)
+   ├── s23-minecraft           ← itzg/minecraft-server
+   ├── s23-minecraft-backups   ← itzg/mc-backup, periodic + on-demand
+   └── (restore-backup, backup-now: manual, profiles=["manual"])
 ```
 
-The manager has the Docker socket mounted plus your compose directory mounted
-at `/mc`. When settings change, it writes a fresh `.env`, runs
-`docker compose down -v` (wipes the world volume), then `docker compose up -d`.
+The manager and the MC stack are two separate `docker compose` projects
+on the same daemon. The manager controls MC by `cd`-ing into the MC
+compose dir and shelling out `docker compose up -d -f <project>.yml`.
+
+The on-disk layout the manager expects (host paths bind-mount into
+fixed container paths — see `docker-compose.yml`):
+
+```
+MINESMFOLDER → /minesm           ← manager-owned root
+  <project>.yml                  ← MC compose, named after the folder
+  <project>.env                  ← written by the manager every season change
+  compose.override.yml           ← optional, auto-loaded if present
+  state.db                       ← manager DB
+  season-NNN-YYYYMMDD/
+    .s23-meta.json               ← season metadata for the past-seasons UI
+    <project>.yml                ← snapshot of the MC compose at season start
+    .staging-mods/               ← pending uploads, only during apply
+    mods/                        ← active modset
+    world/  world_nether/  world_the_end/
+BKPFOLDER → /backups (ro)        ← per-season backup tars
+  season-NNN-YYYYMMDD/
+    <timestamp>.tar.gz
+```
+
+`<project>` (and the project name OMV / `docker compose ls` shows) is
+just `basename(MC_COMPOSE_DIR)` — `minesm` by default, so the files
+become `minesm.yml` + `minesm.env`. Override via `MC_COMPOSE_NAME` env
+if you want a different filename.
 
 ## Setup
 
-1. **Write your Minecraft compose.** Copy the template:
+[`docker-compose.yml`](docker-compose.yml) is the example — two
+placeholder paths to fill in (`MINESMFOLDER`, `BKPFOLDER`), no env
+vars to set, defaults handle the rest.
 
-   ```bash
-   mkdir -p /srv/s23-minecraft
-   cp examples/minecraft.example.yml /srv/s23-minecraft/docker-compose.yml
-   ```
+```bash
+# edit docker-compose.yml, replace MINESMFOLDER / BKPFOLDER
+docker compose pull        # latest manager image from GHCR
+docker compose up -d
+```
 
-   Edit it. Hardcode anything you want immutable (memory, max players, EULA,
-   icon, ops, whitelist, etc.). Reference player-controlled vars as
-   `${VAR:-default}` so compose works even before the manager has written `.env`.
-
-2. **Update the manager's compose** so the volume mount points at the directory
-   you just created. In `docker-compose.yml`:
-
-   ```yaml
-   volumes:
-     - /srv/s23-minecraft:/mc
-   ```
-
-   Make sure `MC_CONTAINER` matches the `container_name` in your MC compose.
-
-3. **Bring it up:**
-
-   ```bash
-   docker compose up -d
-   ```
-
-   Open `http://<host>:8092`. Click **Start server**.
+OMV will display two stacks: `s23minecraft` (the manager) and the MC
+project named after `basename(MINESMFOLDER)`.
 
 ## Player-editable settings
 
 | Field | env var | Notes |
 |---|---|---|
-| Version | `VERSION` | Dropdown of every Minecraft release version (Mojang's manifest, cached 1h). `LATEST` always available. |
+| Server type | `TYPE` | VANILLA / FORGE / FABRIC |
+| Version | `VERSION` | Mojang / Forge / Fabric version lists, cached 1 h. `LATEST` for vanilla only. |
 | Difficulty | `DIFFICULTY` | peaceful / easy / normal / hard |
 | Game mode | `MODE` | survival / creative / adventure / spectator |
 | Seed | `SEED` | blank = random |
 | Online mode | `ONLINE_MODE` | true / false |
-| MOTD | `MOTD` | server description shown in client list (write-only) |
+| MOTD | `MOTD` | server-list description (write-only — blank submit preserves prior) |
 | Ops | `OPS` | comma-separated usernames (write-only — `HIDDEN_OPS` always merged in) |
-| Icon URL | `ICON` | server-list icon, must be 64×64 png |
+| Icon URL | `ICON` | server-list icon, validated as image before save |
+| Description | `DESCRIPTION` | manager-only, shown on the status page (mod-pack URLs etc.) |
 
-These are written by the manager into `<compose-dir>/.env`. The form is
-**locked** while a season is active and **unlocks** when the season expires.
+The form is **locked** while a season is active and **unlocks** on
+expiry / firstRun. When it unlocks, fields reset to defaults — the
+previous season's TYPE / VERSION / ICON do not leak into the next.
 
-## Host-controlled (locked from players)
+## Host-controlled (live in `<project>.yml`, never in the UI)
 
-These live in your compose file directly:
+```yaml
+EULA:        "TRUE"
+MEMORY:      "10G"
+MAX_PLAYERS: "20"
+PVP:         "true"
+```
 
-- `EULA: "TRUE"` — required by itzg
-- `MEMORY: "10G"` — JVM heap, sized for your host
-- `MAX_PLAYERS: "20"`
-- `TYPE: "VANILLA"` — modded servers cause too many failure modes
-- `PVP: "true"`
-- Anything else: `OPS`, `WHITELIST`, `ICON`, `RESOURCE_PACK`, etc.
+Plus the hardening (already in `examples/minecraft.example.yml`):
+`cap_drop: ALL`, `no-new-privileges:true`, `pids_limit`, `mem_limit`,
+`tmpfs /tmp`.
 
 ## CLI
-
-Everything is also available via `docker exec`:
 
 ```bash
 docker exec s23-minecraft-manager s23 <command>
@@ -103,68 +135,78 @@ docker exec s23-minecraft-manager s23 <command>
 
 | Command | Effect |
 |---|---|
-| `status` | print current state, settings, and expiry timestamps |
+| `status` | current state, season name, expiry, settings |
 | `start` | `docker compose up -d` |
-| `stop` | `docker compose stop` (does not remove anything) |
-| `expire` | set `extension_days` so the season's deadline lands at-or-before now — settings unlock in the UI without touching `season_started` |
-| `extend [days]` | add days to current season — default `5`, no last-day check |
-| `expires-in <days>` | force the season to expire `<days>` from now (testing) |
-| `renew` | bring the deadline back to `now + LIFETIME_DAYS` (lock for 40 more days) |
-| `reset` | start a new season (new folder, fresh world); old season's data stays as an archive |
-| `restore` | run `restore-tar-backup` against the current season's latest backup |
-| `setup-end` | lock mod uploads/deletes/restart for the current season — same effect as the 24 h auto-lock or the **End setup** button |
-| `setup-start` | re-open mod editing for the current season — admin override that prevents the 24 h auto-lock from re-firing |
+| `stop` | `docker compose stop` |
+| `expire` | flip extension_days so expiry lands on now; also drops `[SETUP]` whitelist + restarts MC if it was active |
+| `extend [days]` | add days to the current season (default 5) |
+| `expires-in <days>` | force expiry to land in N days |
+| `renew` | re-lock for `LIFETIME_DAYS` from now |
+| `reset` | start a new season (full transition: backup-now → meta close → new .env → compose down → compose up) |
+| `restore` | restore latest backup into the current season's world |
+| `setup-end` | end the mod-setup window early (locks mods, drops whitelist, restarts MC) |
+| `setup-start` | re-open the mod-setup window mid-season (admin override) |
 
-Examples:
+## Mod-setup window
 
-```bash
-docker exec s23-minecraft-manager s23 expires-in 1   # last-day window for testing extend
-docker exec s23-minecraft-manager s23 extend 30      # +30 days, override
-docker exec s23-minecraft-manager s23 reset          # nuke everything, fresh season
-docker exec s23-minecraft-manager s23 setup-start    # let players upload mods past day 1
-docker exec s23-minecraft-manager s23 setup-end      # freeze the modset early
-```
+For non-vanilla seasons, the first 24 h are the **setup window**. The
+manager:
 
-### Mod uploads (FORGE / FABRIC seasons)
+1. Writes `<project>.env` with `WHITELIST=00000000-0000-0000-0000-000000000000`
+   (sentinel UUID, blocks everyone), `WHITE_LIST=TRUE`,
+   `ENFORCE_WHITELIST=TRUE`, and prepends `[SETUP] …` to MOTD.
+2. Shows a **Mods** card on the Server tab.
+3. Operator picks `.jar` files in the browser — they're queued
+   client-side, not uploaded yet. Each can be removed individually.
+4. **Reset world** checkbox decides whether `world / world_nether /
+   world_the_end` get wiped on apply (needed for biome / dimension /
+   structure mods).
+5. **Apply** uploads the queue to `.staging-mods/`, then atomically:
+   stop MC → apply staged deletions → move staged jars into `mods/` →
+   optionally wipe world → start MC.
+6. **Discard** drops the browser queue without touching the server.
+7. After 24 h or `s23 setup-end`, mods are locked, the whitelist is
+   dropped, and MC restarts so players can join.
 
-When a non-vanilla season starts, the **Mods** card shows up in the Logs tab
-for 24 hours. Players can drop `.jar` files in, see what's installed, and
-hit **Restart server to load mods** to recreate the MC container. After the
-window closes (or after `s23 setup-end`), the modset is frozen for the rest
-of the season — uploads, deletes, and the restart button are all rejected
-with a 403 until you start a new season or run `s23 setup-start`.
-
-Files travel through the docker socket (`putArchive` to drop them into
-`/data/mods`, `exec` for list/delete) — no shared bind mount required
-between the manager and MC.
+Closing the tab loses the queue — there's a `beforeunload` warning.
+Restarting the manager also prunes any leftover `.staging-mods/` so
+out-of-band MC restarts can never accidentally load unapplied mods.
 
 ## Configuration
 
-All knobs are env vars on the **manager container** in
-`docker-compose.yml`:
+All env vars on the **manager container**:
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `MC_COMPOSE_DIR` | `/mc` | Path inside the manager where your MC compose lives |
-| `MC_CONTAINER` | `s23-minecraft` | Must match `container_name` in your MC compose |
-| `MC_HOST` | `host.docker.internal` | Hostname the manager pings for player count |
-| `MC_PORT` | `25565` | Published MC port on the host |
-| `LIFETIME_DAYS` | `40` | Length of a season |
-| `EXTEND_DAYS` | `5` | How many days `/api/extend` adds |
-| `HIDDEN_OPS` | empty | Comma-separated usernames always merged into the op list. Never shown in the UI. |
-| `SERVERS_DIR` | `/srv/minecraft/seasons` | Host folder that holds one subfolder per season's world (`<SERVERS_DIR>/<season-name>`) |
-| `BACKUPS_DIR` | `/srv/minecraft-backups` | Host folder that holds one subfolder per season's backups (`<BACKUPS_DIR>/<season-name>`) |
+| `PORT` | `3000` | manager HTTP port (inside the container) |
+| `MC_COMPOSE_DIR` | `/minesm` | container-side path of the manager-owned root (compose, state.db, season folders) |
+| `DATA_DIR` | `MC_COMPOSE_DIR` | manager SQLite location (state.db sits at `${DATA_DIR}/state.db`) |
+| `MC_COMPOSE_NAME` | `basename(MC_COMPOSE_DIR)` | base name for `<name>.yml` and `<name>.env`; also the compose project name (`-p`) |
+| `MC_CONTAINER` | `s23-minecraft` | must match `container_name` in MC compose |
+| `MC_HOST` | `host.docker.internal` | host the manager pings for player count |
+| `MC_PORT` | `25565` | published MC port |
+| `LIFETIME_DAYS` | `40` | season length |
+| `EXTEND_DAYS` | `5` | how many days `/api/extend` adds |
+| `HIDDEN_OPS` | empty | always-on operator list, never visible in the UI |
+| `SERVERS_DIR` | `DATA_DIR` | container-side per-season dir (state.db + season folders share this root) |
+| `BACKUPS_DIR` | `/backups` | container-side per-season backups dir |
 
-## Updating from main
+The manager auto-translates container-side `SERVERS_DIR`/`BACKUPS_DIR`
+to host-side paths by inspecting its own bind mounts before invoking
+`docker compose` for MC — so the same container paths Just Work
+regardless of where the host folders live.
 
-Push commits → CI publishes a new image to GHCR
-(`ghcr.io/matheusgmendes/s23minecraft:latest`). On the host:
+## Updating
+
+Push to `main` → CI publishes `ghcr.io/matheusgmendes/s23minecraft:latest`.
+On the server:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-Manager state (DB) lives in the `manager-data` named volume; survives image
-upgrades. World data lives in your MC compose's volume; only `s23 reset` /
-settings change wipes it.
+Manager state (DB) lives at `${DATA_DIR}/state.db` — survives image
+upgrades. World data lives in `${SERVERS_DIR}/<season>/world/`. Only an
+explicit "Reset world" reload, `s23 reset`, or the next season's
+"Apply" wipes any of it.

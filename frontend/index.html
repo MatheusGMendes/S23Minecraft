@@ -25,9 +25,6 @@
       <div class="motd-line" id="motd-line"></div>
       <div class="description-line" id="description-line" hidden></div>
       <div class="connect-line" id="connect-line"></div>
-      <div class="actions" id="start-actions">
-        <button id="start-btn" type="button">Start server</button>
-      </div>
       <div class="season-row">
         <span class="season-label" id="season-label">Season</span>
         <span class="season-progress"><span id="season-bar"></span></span>
@@ -37,16 +34,16 @@
     </section>
 
     <nav class="tabs" id="tabs">
-      <button class="tab" type="button" data-tab="settings" hidden>Settings</button>
-      <button class="tab active" type="button" data-tab="logs">Logs</button>
+      <button class="tab" type="button" data-tab="settings" hidden>New season</button>
+      <button class="tab active" type="button" data-tab="logs">Server</button>
     </nav>
 
     <div class="tab-panel" data-tab="settings" hidden>
       <section class="settings-card">
         <form id="settings-form">
-          <p class="muted">Submitting wipes the world and starts a fresh 40-day season.</p>
+          <p class="muted">Submitting starts a complete new server with its own world. The current server is archived and will be reachable from the Seasons page (coming soon).</p>
           <div class="grid"></div>
-          <button type="submit" id="apply-btn">Apply &amp; start new season</button>
+          <button type="submit" id="apply-btn">Start new server</button>
         </form>
       </section>
     </div>
@@ -58,14 +55,23 @@
         <div class="mods-uploader" id="mods-edit-row">
           <input id="mods-input" type="file" accept=".jar" multiple hidden />
           <label for="mods-input" class="mods-pick">
-            <span id="mods-pick-label">Choose .jar files</span>
+            <span id="mods-pick-label">Upload .jar files</span>
           </label>
-          <button id="mods-upload-btn" type="button" disabled>Upload</button>
         </div>
         <ul id="mods-list" class="mods-list"></ul>
-        <button id="mods-apply-btn" type="button" class="extend-btn" hidden>
-          Restart server to load mods
-        </button>
+        <div class="mods-apply-row" id="mods-apply-row" hidden>
+          <p class="muted mods-apply-hint" id="mods-apply-hint"></p>
+          <label class="mods-wipe-toggle">
+            <input type="checkbox" id="mods-wipe-toggle" />
+            <span>Reset world (worldgen-affecting mods)</span>
+          </label>
+          <button id="mods-apply-btn" type="button" class="extend-btn">
+            Apply and restart
+          </button>
+          <button id="mods-discard-btn" type="button" class="mods-discard-btn" hidden>
+            Discard pending uploads
+          </button>
+        </div>
         <button id="mods-end-btn" type="button" class="extend-btn">
           End setup &amp; lock mods
         </button>
@@ -77,8 +83,23 @@
         </div>
         <pre id="logs" class="logs-pre">(idle)</pre>
       </section>
+      <section class="settings-card seasons-card" id="seasons-card" hidden>
+        <h2>Past seasons</h2>
+        <ul id="seasons-list" class="seasons-list"></ul>
+        <button id="seasons-more-btn" type="button" class="seasons-more-btn" hidden>
+          Load more
+        </button>
+      </section>
     </div>
   </main>
+  <div id="modal" class="modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h3 class="modal-title" id="modal-title"></h3>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-actions" id="modal-actions"></div>
+    </div>
+  </div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

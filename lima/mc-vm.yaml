@@ -1,0 +1,112 @@
+# Lima VM dedicated to running the S23 Minecraft server with kernel-level
+# isolation. A compromised mod that breaks out of the JVM lands in *this*
+# VM's kernel, not the host kernel. The manager (still on the host's docker
+# daemon) drives MC by talking to this VM's docker daemon over the
+# SSH-tunneled unix socket Lima exposes at:
+#
+#   $HOME/.lima/<vm-name>/sock/docker.sock
+#
+# That socket replaces /var/run/docker.sock inside the manager container,
+# so every container the manager creates (MC, backups, the busybox temp
+# helpers used for mod/world cleanup) lives inside the VM.
+#
+# Provisioned by scripts/setup-mc-vm.sh.
+
+# vmType "vz" uses Apple's Virtualization.framework on macOS — fastest on
+# Apple Silicon, also gives us virtiofs for the project mount. Falls back
+# to qemu automatically on hosts where vz is unsupported.
+vmType: "vz"
+
+# Resource caps. Tune to your machine — the JVM heap inside MC is set in
+# minecraft/docker-compose.yml (MEMORY=10G), so leave 2-4 GiB headroom for
+# the VM kernel + docker.
+cpus: 4
+memory: "12GiB"
+disk: "40GiB"
+
+# Minimal Ubuntu cloud image — small attack surface, well supported by
+# docker. Lima picks the right arch automatically. Ubuntu retires the
+# minimal-cloudimg URLs once an LTS goes EOL, so bump these when the
+# release stops being supported.
+images:
+  - location: "https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-arm64.img"
+    arch: "aarch64"
+  - location: "https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64.img"
+    arch: "x86_64"
+
+# Mount the whole project directory — both the manager and MC compose
+# stacks run inside the VM (under its docker daemon), so the daemon needs
+# read-write access to the manager's data dir AND the per-season world
+# dirs. The rest of $HOME stays inaccessible.
+mounts:
+  - location: "{{.Home}}/code/S23Minecraft"
+    writable: true
+
+# Forwarded ports:
+#   25565 — Minecraft public port (host:25565 → VM:25565)
+#   8092  — manager UI (host:127.0.0.1:8092 → VM:127.0.0.1:8092),
+#           localhost-only on the host so it's not exposed on the LAN
+#
+# RCON (25575) stays inside the VM — the backups container reaches it on
+# the docker bridge. The docker daemon socket is also forwarded so we can
+# `docker --context lima-mc-vm` from the host.
+portForwards:
+  - guestPortRange: [25565, 25565]
+    hostIP: "0.0.0.0"
+  - guestPort: 25575
+    guestIP: "127.0.0.1"
+    hostIP: "127.0.0.1"
+    hostPort: 25575
+  - guestSocket: "/var/run/docker.sock"
+    hostSocket: "{{.Dir}}/sock/docker.sock"
+
+# We don't need containerd; docker is enough.
+containerd:
+  system: false
+  user: false
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! command -v docker >/dev/null 2>&1; then
+        curl -fsSL https://get.docker.com | sh
+      fi
+      systemctl enable --now docker
+
+      # Daemon hardening: disable inter-container traffic by default
+      # (compose networks opt back in via `icc`-aware bridges), enable
+      # live-restore so the daemon can be upgraded without killing MC,
+      # and refuse new privileges by default.
+      install -d -m 0755 /etc/docker
+      cat > /etc/docker/daemon.json <<'JSON'
+      {
+        "icc": false,
+        "live-restore": true,
+        "no-new-privileges": true,
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" }
+      }
+      JSON
+      systemctl restart docker
+
+      # Add the default Lima user to the docker group so the SSH-tunneled
+      # socket access (which runs as that user) doesn't need sudo. Lima
+      # maps the host's username to a guest user with the host's UID, so
+      # on macOS this is typically UID 501 — not the Linux convention of
+      # 1000. Pick the first user with an INTERACTIVE login shell (real
+      # users only — systemd-network/timesync/resolve all have nologin
+      # but UID > 500 too). awk returns 0 on no match, safe under `set -eu`.
+      LIMA_USER="$(awk -F: '$7 !~ /(nologin|false)$/ && $3>=100 && $3<65534 {print $1; exit}' /etc/passwd)"
+      if [ -n "$LIMA_USER" ]; then
+        usermod -aG docker "$LIMA_USER"
+      fi
+
+probes:
+  - description: "docker is reachable inside the VM"
+    script: |
+      #!/bin/bash
+      set -eu
+      timeout 60 bash -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
+    hint: "docker did not become available inside the VM; check provision logs with: limactl shell mc-vm sudo journalctl -u docker"

@@ -1,26 +1,31 @@
+# Example compose for the S23 manager. Copy this file, change the
+# two placeholder paths below to wherever you keep things, and run
+# `docker compose up -d`.
+#
+# Two folders to fill in (search-and-replace before deploying):
+#   MINESMFOLDER  — host folder for everything the manager owns: the MC
+#                   compose (<basename>.yml + <basename>.env), the
+#                   manager's state.db, and the season-NNN-YYYYMMDD
+#                   subdirs (MC server worlds). Its basename becomes the
+#                   project name in OMV's compose UI.
+#   BKPFOLDER     — host folder for backup tars (.tgz files).
+
 services:
   s23-minecraft-manager:
-    container_name: s23-minecraft-manager
     image: ghcr.io/matheusgmendes/s23minecraft:latest
-    build: .
+    container_name: s23-minecraft-manager
     ports:
-      - "8092:3000"
+      - "3002:3000"
     extra_hosts:
-      # Lets the manager reach the published Minecraft port via the host gateway.
       - "host.docker.internal:host-gateway"
     volumes:
-      # Two host paths you fill in. Either set the env vars in your shell
-      # / .env, or replace the ${...} bits with absolute paths directly.
-      #   DATA_DIR     — folder where the manager keeps its sqlite DB
-      #   COMPOSE_DIR  — folder containing YOUR Minecraft docker-compose.yml
-      - ${DATA_DIR:-./data}:/data
+      # Manager-owned root: <name>.yml + <name>.env (MC compose),
+      # state.db (manager), season-NNN-YYYYMMDD subdirs (MC worlds).
+      - MINESMFOLDER:/minesm
+      # Per-season backup tars, read-only (the MC backup sidecar writes them).
+      - BKPFOLDER:/backups:ro
+      # Docker socket — manager bounces the MC stack via `docker compose`.
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${COMPOSE_DIR:-./minecraft}:/mc
     environment:
-      MC_CONTAINER: s23-minecraft       # must match container_name in your MC compose
-      MC_HOST: host.docker.internal
-      MC_PORT: "25565"
-      LIFETIME_DAYS: "40"
-      # Always-on operators, never visible in the UI. Comma-separated names.
       HIDDEN_OPS: "Mendes57"
     restart: unless-stopped
