@@ -26,9 +26,11 @@ const HIDDEN_OPS       = process.env.HIDDEN_OPS || '';
 const PUBLIC_DIR       = process.env.PUBLIC_DIR     || path.join(__dirname, '..', 'public');
 
 // SERVERS_DIR / BACKUPS_DIR — container-side paths the MANAGER uses
-// for its own fs ops (mod uploads, backup listing). SERVERS_DIR shares
-// a root with DATA_DIR so state.db sits alongside the season-NNN dirs.
-const SERVERS_DIR = process.env.SERVERS_DIR || DATA_DIR;
+// for its own fs ops (mod uploads, backup listing). Seasons live one
+// level deeper than state.db so the manager-owned root stays tidy:
+//   /minesm/state.db
+//   /minesm/seasons/season-NNN-YYYYMMDD/...
+const SERVERS_DIR = process.env.SERVERS_DIR || path.join(DATA_DIR, 'seasons');
 const BACKUPS_DIR = process.env.BACKUPS_DIR || '/backups';
 
 

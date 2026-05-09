@@ -64,12 +64,13 @@ MINESMFOLDER → /minesm           ← manager-owned root
   <project>.env                  ← written by the manager every season change
   compose.override.yml           ← optional, auto-loaded if present
   state.db                       ← manager DB
-  season-NNN-YYYYMMDD/
-    .s23-meta.json               ← season metadata for the past-seasons UI
-    <project>.yml                ← snapshot of the MC compose at season start
-    .staging-mods/               ← pending uploads, only during apply
-    mods/                        ← active modset
-    world/  world_nether/  world_the_end/
+  seasons/
+    season-NNN-YYYYMMDD/
+      .s23-meta.json             ← season metadata for the past-seasons UI
+      <project>.yml              ← snapshot of the MC compose at season start
+      .staging-mods/             ← pending uploads, only during apply
+      mods/                      ← active modset
+      world/  world_nether/  world_the_end/
 BKPFOLDER → /backups (ro)        ← per-season backup tars
   season-NNN-YYYYMMDD/
     <timestamp>.tar.gz
@@ -188,7 +189,7 @@ All env vars on the **manager container**:
 | `LIFETIME_DAYS` | `40` | season length |
 | `EXTEND_DAYS` | `5` | how many days `/api/extend` adds |
 | `HIDDEN_OPS` | empty | always-on operator list, never visible in the UI |
-| `SERVERS_DIR` | `DATA_DIR` | container-side per-season dir (state.db + season folders share this root) |
+| `SERVERS_DIR` | `${DATA_DIR}/seasons` | container-side per-season dir |
 | `BACKUPS_DIR` | `/backups` | container-side per-season backups dir |
 
 The manager auto-translates container-side `SERVERS_DIR`/`BACKUPS_DIR`

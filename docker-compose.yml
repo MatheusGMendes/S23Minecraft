@@ -5,9 +5,9 @@
 # Two folders to fill in (search-and-replace before deploying):
 #   MINESMFOLDER  — host folder for everything the manager owns: the MC
 #                   compose (<basename>.yml + <basename>.env), the
-#                   manager's state.db, and the season-NNN-YYYYMMDD
-#                   subdirs (MC server worlds). Its basename becomes the
-#                   project name in OMV's compose UI.
+#                   manager's state.db, and a `seasons/` subdir holding
+#                   each season-NNN-YYYYMMDD world. Its basename becomes
+#                   the project name in OMV's compose UI.
 #   BKPFOLDER     — host folder for backup tars (.tgz files).
 
 services:
@@ -20,7 +20,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       # Manager-owned root: <name>.yml + <name>.env (MC compose),
-      # state.db (manager), season-NNN-YYYYMMDD subdirs (MC worlds).
+      # state.db (manager), seasons/season-NNN-YYYYMMDD/ (MC worlds).
       - MINESMFOLDER:/minesm
       # Per-season backup tars, read-only (the MC backup sidecar writes them).
       - BKPFOLDER:/backups:ro
