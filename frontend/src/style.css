@@ -280,6 +280,19 @@ button:disabled {
 
 .logs-follow input { cursor: pointer; }
 
+.logs-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logs-download-btn {
+  width: auto;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
 .logs-pre {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.75rem;

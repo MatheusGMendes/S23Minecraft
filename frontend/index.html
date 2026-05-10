@@ -79,7 +79,10 @@
       <section class="logs-card">
         <div class="logs-header">
           <h2>Server logs</h2>
-          <label class="logs-follow"><input type="checkbox" id="logs-follow" checked /> follow</label>
+          <div class="logs-controls">
+            <label class="logs-follow"><input type="checkbox" id="logs-follow" checked /> follow</label>
+            <button id="logs-download" type="button" class="logs-download-btn">Download .txt</button>
+          </div>
         </div>
         <pre id="logs" class="logs-pre">(idle)</pre>
       </section>

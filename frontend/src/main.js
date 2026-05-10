@@ -18,7 +18,7 @@ import {
 import {
   initModsCard, renderModsCard, refreshModsList,
 } from './components/modsCard.js';
-import { refreshLogs } from './components/logsCard.js';
+import { initLogsCard, refreshLogs } from './components/logsCard.js';
 import { initSeasonsCard, refreshSeasons } from './components/seasonsCard.js';
 
 // Single refresh: pull the freshest /api/state, then fan it out to every
@@ -44,6 +44,7 @@ async function refresh() {
   initSettingsForm({ onAction: refresh });
   initModsCard({ onAction: refresh });
   initSeasonsCard();
+  initLogsCard();
 
   await loadAllVersionLists();
   buildForm();
