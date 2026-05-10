@@ -47,7 +47,7 @@ const SETTING_KEYS = [
 // Settings that exist for the manager UI only — never written to .env.
 const MANAGER_ONLY_KEYS = new Set(['DESCRIPTION']);
 
-const SERVER_TYPES = ['VANILLA', 'FORGE', 'FABRIC'];
+const SERVER_TYPES = ['VANILLA', 'FORGE', 'FABRIC', 'NEOFORGE'];
 
 const DEFAULT_SETTINGS = {
   TYPE: 'VANILLA',

@@ -24,9 +24,9 @@ gameplay knobs from a web UI; the host operator owns a plain
 - **Past seasons UI.** The Server tab lists archived seasons with their
   TYPE / VERSION and a **Download backup** link that streams the most
   recent tar from `<BACKUPS_DIR>/<season>/`.
-- **Mod-setup window** (FORGE / FABRIC seasons). For the first 24 h
-  after a non-vanilla season starts, the manager runs MC behind an
-  empty whitelist (`[SETUP]` MOTD prefix) so players can't join.
+- **Mod-setup window** (FORGE / FABRIC / NEOFORGE seasons). For the
+  first 24 h after a non-vanilla season starts, the manager runs MC
+  behind an empty whitelist (`[SETUP]` MOTD prefix) so players can't join.
   Operator queues `.jar` uploads in the browser, picks each file's
   fate, then hits Apply — that uploads, optionally wipes world for
   worldgen-affecting mods, and restarts MC. Window closes after 24 h
@@ -100,8 +100,8 @@ project named after `basename(MINESMFOLDER)`.
 
 | Field | env var | Notes |
 |---|---|---|
-| Server type | `TYPE` | VANILLA / FORGE / FABRIC |
-| Version | `VERSION` | Mojang / Forge / Fabric version lists, cached 1 h. `LATEST` for vanilla only. |
+| Server type | `TYPE` | VANILLA / FORGE / FABRIC / NEOFORGE |
+| Version | `VERSION` | Mojang / Forge / Fabric / NeoForge version lists, cached 1 h, filtered to versions the local itzg image was built late enough to deploy. `LATEST` for vanilla only. |
 | Difficulty | `DIFFICULTY` | peaceful / easy / normal / hard |
 | Game mode | `MODE` | survival / creative / adventure / spectator |
 | Seed | `SEED` | blank = random |

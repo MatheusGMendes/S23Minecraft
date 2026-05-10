@@ -12,10 +12,11 @@ const { docker } = require('./docker');
 
 const VERSIONS_TTL_MS = 60 * 60 * 1000;
 
-let mojangCache = { ts: 0, data: ['LATEST'], releaseDates: {} };
-let forgeCache  = { ts: 0, data: [] };
-let fabricCache = { ts: 0, data: [] };
-let itzgCache   = { ts: 0, ms: null };
+let mojangCache   = { ts: 0, data: ['LATEST'], releaseDates: {} };
+let forgeCache    = { ts: 0, data: [] };
+let fabricCache   = { ts: 0, data: [] };
+let neoforgeCache = { ts: 0, data: [] };
+let itzgCache     = { ts: 0, ms: null };
 
 // Sort MC version strings like "1.21.4", "1.7.10", "1.20" newest-first.
 function sortMcVersionsDesc(list) {
@@ -110,4 +111,35 @@ async function getFabricVersions() {
   return fabricCache.data;
 }
 
-module.exports = { getMojangVersions, getForgeVersions, getFabricVersions };
+// NeoForge versions encode the MC base in the version string itself.
+// Two layouts in the wild:
+//   3-part legacy:  "21.4.155"        → MC "1.21.4"  (1.<major>.<minor>)
+//   4-part new:     "26.1.2.41-beta"  → MC "26.1.2"  (post-Mojang rename)
+function neoforgeToMcVersion(rawVersion) {
+  const clean = String(rawVersion).replace(/-(beta|alpha|rc[^-]*)$/i, '');
+  const parts = clean.split('.');
+  if (parts.length === 4) return parts.slice(0, 3).join('.');
+  if (parts.length === 3) return `1.${parts[0]}.${parts[1]}`;
+  return null;
+}
+
+async function getNeoforgeVersions() {
+  if (Date.now() - neoforgeCache.ts > VERSIONS_TTL_MS) {
+    try {
+      const r = await fetch('https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge');
+      const j = await r.json();
+      const set = new Set();
+      for (const v of j.versions || []) {
+        const mc = neoforgeToMcVersion(v);
+        if (mc) set.add(mc);
+      }
+      await getMojangVersions();
+      const itzgMs = await getItzgImageDateMs();
+      const filtered = filterByItzgDate([...set], mojangCache.releaseDates, itzgMs);
+      neoforgeCache = { ts: Date.now(), data: sortMcVersionsDesc(filtered) };
+    } catch (e) { console.warn('neoforge versions fetch failed:', e.message); }
+  }
+  return neoforgeCache.data;
+}
+
+module.exports = { getMojangVersions, getForgeVersions, getFabricVersions, getNeoforgeVersions };

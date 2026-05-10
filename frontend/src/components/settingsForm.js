@@ -9,7 +9,7 @@ import { VERSION_LISTS } from '../lib/versions.js';
 
 // Player-facing fields. `span: 'full'` makes the field span both grid columns.
 const FIELDS = [
-  { key: 'TYPE',        label: 'Server type',  type: 'select', options: ['VANILLA', 'FORGE', 'FABRIC'] },
+  { key: 'TYPE',        label: 'Server type',  type: 'select', options: ['VANILLA', 'FORGE', 'FABRIC', 'NEOFORGE'] },
   { key: 'VERSION',     label: 'Version',      type: 'select', options: ['LATEST'] },
   { key: 'DIFFICULTY',  label: 'Difficulty',   type: 'select', options: ['peaceful', 'easy', 'normal', 'hard'] },
   { key: 'MODE',        label: 'Game mode',    type: 'select', options: ['survival', 'creative', 'adventure', 'spectator'] },
@@ -162,6 +162,9 @@ export function renderSettingsForm(s) {
       el.value = DEFAULT_FORM_VALUES[f.key] ?? '';
     }
     syncVersionOptions(DEFAULT_FORM_VALUES.VERSION);
+    // The form just unlocked (firstRun or season expired) — pull the
+    // user onto the New-season tab so they don't miss it sitting on logs.
+    settingsTab.click();
   }
   lastEditable = settingsEditable;
 }
