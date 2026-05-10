@@ -30,7 +30,7 @@ const cmds = {
     console.log(`settings:       ${JSON.stringify(s.settings, null, 2)}`);
   },
 
-  async start() { await startCompose(); console.log('started'); },
+  async start() { await startCompose(); console.log('compose up — minecraft + backups running'); },
 
   async stop() {
     try { console.log(await compose(['stop'])); }
@@ -54,13 +54,20 @@ const cmds = {
     // mode and bounce MC. Otherwise leave MC running.
     const after = getState();
     const r = db.prepare('SELECT env_setup_mode FROM state WHERE id = 1').get();
+    let droppedSetupMode = false;
     if (r.env_setup_mode) {
-      console.log('reconciling: dropping setup-mode .env and restarting MC…');
+      console.log('was in setup mode — dropping setup whitelist and bouncing MC…');
       writeEnvFile(after.settings, after.seasonName, { setupMode: false });
       try { console.log(await compose(['stop', 'minecraft'])); } catch (e) { console.warn('stop warn:', e.message); }
       console.log(await compose(['up', '-d', 'minecraft']));
+      droppedSetupMode = true;
     }
-    console.log('season expired — settings unlocked, players can join');
+
+    console.log(`season #${s.seasonId} (${s.seasonName}) marked expired.`);
+    console.log('Current MC keeps running on the old world.');
+    if (droppedSetupMode) console.log('Setup whitelist dropped — players can now join this still-running world.');
+    console.log('To start a NEW season: open the UI form (now editable) and Apply,');
+    console.log('  or run `s23 reset` to reuse the current settings.');
   },
 
   async extend() {
@@ -95,7 +102,7 @@ const cmds = {
   async reset() {
     const s = getState();
     await applyNewSeason(s.settings);
-    console.log('new season started.');
+    console.log('new season started — old world archived under its own season folder, fresh world for the new season.');
   },
 
   'setup-end': async () => {
@@ -135,17 +142,19 @@ const cmds = {
 
 const usage = `usage: s23 <command>
 
-  status              show current state, current season name, and expiry
-  start               docker compose up -d
-  stop                docker compose stop
-  expire              backdate season so settings unlock in the UI
-  extend [days]       add days to current season (default 5)
-  expires-in <days>   force season to expire in N days from now
-  renew               set season_started = now (lock for ${LIFETIME_DAYS} days)
-  reset               start a new season — new folder, fresh world, old archived
+  status              show current season name, expiry, settings
+  start               compose up the MC stack (minecraft + backups)
+  stop                compose stop the MC stack
   restore             restore the latest backup into the current season's world
-  setup-end           lock mod uploads/deletes for the current season
-  setup-start         unlock mod uploads/deletes for the current season
+  reset               start a new season NOW — new folder, fresh world, old archived
+
+  expire              backdate the deadline so the UI form unlocks (does NOT end MC; pair with \`reset\` or UI Apply to actually transition)
+  extend [days]       add days to current season's deadline (default 5)
+  expires-in <days>   force the deadline to land N days from now
+  renew               reset season_started to now (lock for ${LIFETIME_DAYS} more days)
+
+  setup-end           close the mod-setup window — locks mod uploads, drops the [SETUP] whitelist, players can join
+  setup-start         re-open the mod-setup window — unlocks mods, re-enables the whitelist (non-vanilla only)
 `;
 
 (async () => {
