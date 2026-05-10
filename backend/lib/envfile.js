@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const {
   MC_COMPOSE_DIR, MC_COMPOSE_FILE, MC_ENV_FILE,
   HIDDEN_OPS, SETTING_KEYS, MANAGER_ONLY_KEYS,
-  SETUP_MODE_MOTD_PREFIX, SETUP_MODE_WHITELIST_SENTINEL,
+  SETUP_MODE_MOTD_PREFIX,
 } = require('./config');
 const { db } = require('./db');
 
@@ -76,8 +76,10 @@ function mergeOps(playerInput) {
 }
 
 // Single source of truth for the .env file. opts.setupMode toggles the
-// whitelist + MOTD prefix; the env_setup_mode DB column mirrors the
-// last value we wrote so reconcileSetupMode() can detect drift.
+// MOTD prefix only; players are NEVER blocked by whitelist anymore —
+// the [SETUP] MOTD is the only signal that mods are still being staged.
+// The env_setup_mode DB column mirrors what we wrote so
+// reconcileSetupMode() can detect drift on a missed MC restart.
 function writeEnvFile(settings, seasonName, opts = {}) {
   ensureMcComposeFile();
   const rconPassword = ensureRconPassword();
@@ -96,19 +98,8 @@ function writeEnvFile(settings, seasonName, opts = {}) {
     });
   lines.unshift(`SEASON_NAME=${seasonName}`);
   lines.push(`RCON_PASSWORD=${rconPassword}`);
-
-  // Whitelist gating. setupMode = the all-zero UUID gets written so
-  // nobody can join (not even ops). Otherwise both server.properties
-  // flags get explicit FALSE so any prior setup state is dropped.
-  if (setupMode) {
-    lines.push(`WHITELIST=${SETUP_MODE_WHITELIST_SENTINEL}`);
-    lines.push('WHITE_LIST=TRUE');
-    lines.push('ENFORCE_WHITELIST=TRUE');
-    lines.push('EXISTING_WHITELIST_FILE=SYNCHRONIZE');
-  } else {
-    lines.push('WHITE_LIST=FALSE');
-    lines.push('ENFORCE_WHITELIST=FALSE');
-  }
+  lines.push('WHITE_LIST=FALSE');
+  lines.push('ENFORCE_WHITELIST=FALSE');
 
   fs.writeFileSync(MC_ENV_FILE, lines.join('\n') + '\n');
   // Track what we just wrote so reconcileSetupMode() can detect drift

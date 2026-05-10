@@ -109,13 +109,13 @@ async function applyNewSeason(newSettings) {
 }
 
 // Background task: rewrite .env without setup-mode and bounce MC. Fired
-// from db.getState()'s lazy auto-lock transition so the whitelist
-// actually gets lifted at the 24h mark instead of waiting for the next
-// reload.
+// from db.getState()'s lazy auto-lock transition so the [SETUP] MOTD
+// prefix actually gets dropped at the 24h mark instead of waiting for
+// the next reload.
 async function applyAutoLockRestart() {
   const s = getState();
   if (s.firstRun) return;
-  console.log('mods auto-lock fired — restarting MC to drop the setup whitelist');
+  console.log('mods auto-lock fired — restarting MC to drop the [SETUP] MOTD prefix');
   writeEnvFile(s.settings, s.seasonName, { setupMode: false });
   try { await compose(['stop', 'minecraft']); } catch (e) { console.warn('stop warn:', e.message); }
   await compose(['up', '-d', 'minecraft']);

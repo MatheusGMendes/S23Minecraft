@@ -25,8 +25,10 @@ gameplay knobs from a web UI; the host operator owns a plain
   TYPE / VERSION and a **Download backup** link that streams the most
   recent tar from `<BACKUPS_DIR>/<season>/`.
 - **Mod-setup window** (FORGE / FABRIC / NEOFORGE seasons). For the
-  first 24 h after a non-vanilla season starts, the manager runs MC
-  behind an empty whitelist (`[SETUP]` MOTD prefix) so players can't join.
+  first 24 h after a non-vanilla season starts, the manager prepends a
+  `[SETUP]` MOTD prefix so players see in the server-list ping that the
+  modset may still change. Joining is **not** blocked — players can hop
+  in to test as the mod stack settles.
   Operator queues `.jar` uploads in the browser, picks each file's
   fate, then hits Apply — that uploads, optionally wipes world for
   worldgen-affecting mods, and restarts MC. Window closes after 24 h
@@ -139,13 +141,13 @@ docker exec s23-minecraft-manager s23 <command>
 | `status` | current state, season name, expiry, settings |
 | `start` | `docker compose up -d` |
 | `stop` | `docker compose stop` |
-| `expire` | flip extension_days so expiry lands on now; also drops `[SETUP]` whitelist + restarts MC if it was active |
+| `expire` | flip extension_days so expiry lands on now; also drops the `[SETUP]` MOTD prefix + restarts MC if setup mode was active |
 | `extend [days]` | add days to the current season (default 5) |
 | `expires-in <days>` | force expiry to land in N days |
 | `renew` | re-lock for `LIFETIME_DAYS` from now |
 | `reset` | start a new season (full transition: backup-now → meta close → new .env → compose down → compose up) |
 | `restore` | restore latest backup into the current season's world |
-| `setup-end` | end the mod-setup window early (locks mods, drops whitelist, restarts MC) |
+| `setup-end` | end the mod-setup window early (locks mods, drops `[SETUP]` MOTD, restarts MC) |
 | `setup-start` | re-open the mod-setup window mid-season (admin override) |
 
 ## Mod-setup window
@@ -153,9 +155,9 @@ docker exec s23-minecraft-manager s23 <command>
 For non-vanilla seasons, the first 24 h are the **setup window**. The
 manager:
 
-1. Writes `<project>.env` with `WHITELIST=00000000-0000-0000-0000-000000000000`
-   (sentinel UUID, blocks everyone), `WHITE_LIST=TRUE`,
-   `ENFORCE_WHITELIST=TRUE`, and prepends `[SETUP] …` to MOTD.
+1. Writes `<project>.env` with `WHITE_LIST=FALSE` / `ENFORCE_WHITELIST=FALSE`
+   and prepends `[SETUP] …` to MOTD. Players can join — the prefix is
+   purely a heads-up that mods may still change.
 2. Shows a **Mods** card on the Server tab.
 3. Operator picks `.jar` files in the browser — they're queued
    client-side, not uploaded yet. Each can be removed individually.
@@ -166,8 +168,8 @@ manager:
    stop MC → apply staged deletions → move staged jars into `mods/` →
    optionally wipe world → start MC.
 6. **Discard** drops the browser queue without touching the server.
-7. After 24 h or `s23 setup-end`, mods are locked, the whitelist is
-   dropped, and MC restarts so players can join.
+7. After 24 h or `s23 setup-end`, mods are locked, the `[SETUP]` MOTD
+   prefix drops, and MC restarts.
 
 Closing the tab loses the queue — there's a `beforeunload` warning.
 Restarting the manager also prunes any leftover `.staging-mods/` so

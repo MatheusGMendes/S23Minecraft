@@ -143,8 +143,9 @@ function isModsAccessibleFor(s) {
 const canUploadModsFor = (s) => isModsAccessibleFor(s);
 
 // Setup mode = the season is currently in its mod-configuration window.
-// While true the .env carries WHITELIST + WHITE_LIST + ENFORCE_WHITELIST
-// so only the empty sentinel UUID matches (i.e. nobody can join).
+// While true the MC `.env` MOTD gets a `[SETUP]` prefix so players see in
+// the server-list ping that the modset may still change. Joining is not
+// blocked — the prefix is purely a heads-up.
 const isSetupModeFor = (s) => isModsAccessibleFor(s);
 
 // "wipe world on reload" default — true during the INITIAL 24h setup

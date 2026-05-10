@@ -62,17 +62,15 @@ const DEFAULT_SETTINGS = {
   DESCRIPTION: '',
 };
 
-// Mod upload caps.
-const MOD_MAX_BYTES  = 300 * 1024 * 1024;  // 300 MB per .jar
-const MAX_MOD_FILES  = 20;                 // per request
+// Mod upload cap. Per-file size only — there's no cap on the number of
+// jars in a single request.
+const MOD_MAX_BYTES  = 2 * 1024 * 1024 * 1024;  // 2 GB per .jar
 
-// Setup-mode constants. The MOTD prefix shows in the server-list ping;
-// the sentinel UUID is written into whitelist.json so itzg's
-// setupWhitelist actually lands a deny-everyone list (an empty WHITELIST
-// env var falls through to "not set" and skips writing the file).
+// Setup-mode MOTD prefix — shown in the server-list ping while the mod
+// upload window is open so players can tell mods may still change.
+// The window no longer blocks joining; this is purely informational.
 const SETUP_MODE_MOTD_PREFIX =
-  '[SETUP] Server is configuring mods — joining is disabled until setup ends. ';
-const SETUP_MODE_WHITELIST_SENTINEL = '00000000-0000-0000-0000-000000000000';
+  '[SETUP] Mods may still change — server is in the staging window. ';
 
 module.exports = {
   PORT, DATA_DIR, MC_COMPOSE_DIR, MC_COMPOSE_NAME, MC_COMPOSE_FILE, MC_ENV_FILE,
@@ -81,6 +79,6 @@ module.exports = {
   SERVERS_DIR, BACKUPS_DIR,
   EXTEND_WINDOW_MS, MODS_UPLOAD_WINDOW_MS,
   SETTING_KEYS, MANAGER_ONLY_KEYS, SERVER_TYPES, DEFAULT_SETTINGS,
-  MOD_MAX_BYTES, MAX_MOD_FILES,
-  SETUP_MODE_MOTD_PREFIX, SETUP_MODE_WHITELIST_SENTINEL,
+  MOD_MAX_BYTES,
+  SETUP_MODE_MOTD_PREFIX,
 };

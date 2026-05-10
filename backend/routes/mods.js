@@ -3,11 +3,8 @@
 
 const express = require('express');
 const fs = require('fs');
-const path = require('path');
 const multer = require('multer');
-const {
-  MOD_MAX_BYTES, MAX_MOD_FILES,
-} = require('../lib/config');
+const { MOD_MAX_BYTES } = require('../lib/config');
 const {
   db, getState, canUploadModsFor, isSetupModeFor, wipeWorldDefaultFor,
 } = require('../lib/db');
@@ -21,12 +18,31 @@ const { seasonModsDir, seasonStagingDir } = require('../lib/seasons');
 
 const router = express.Router();
 
+// Stream uploads straight into the season's staging dir so 2 GB jars
+// don't have to sit in node's heap for the duration of the request.
+// Multer creates the file with the safe name as soon as the part starts;
+// route handler only verifies / lists what landed.
 const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MOD_MAX_BYTES, files: MAX_MOD_FILES },
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      try {
+        const s = getState();
+        if (!canUploadModsFor(s)) return cb(new Error('mods upload window is closed'));
+        const dir = seasonStagingDir(s.seasonName);
+        if (!dir) return cb(new Error('no current season'));
+        fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      } catch (e) { cb(e); }
+    },
+    filename: (_req, file, cb) => {
+      const safe = safeModName(file.originalname);
+      if (!safe) return cb(new Error(`rejected: ${file.originalname} (only .jar allowed)`));
+      cb(null, safe);
+    },
+  }),
+  limits: { fileSize: MOD_MAX_BYTES },
   fileFilter: (_req, file, cb) => {
-    if (safeModName(file.originalname)) cb(null, true);
-    else cb(new Error(`rejected: ${file.originalname} (only .jar allowed)`));
+    cb(null, !!safeModName(file.originalname));
   },
 });
 
@@ -67,37 +83,18 @@ router.get('/api/mods', (_req, res) => {
 // Stage uploaded jars to .staging-mods/. They only become active when
 // /api/mods/apply runs — no out-of-band MC restart can pick them up.
 router.post('/api/mods', (req, res, next) => {
-  upload.array('mods', MAX_MOD_FILES)(req, res, (err) => {
+  upload.array('mods')(req, res, (err) => {
     if (err) {
-      const msg = err.code === 'LIMIT_FILE_COUNT'
-          ? `too many files (max ${MAX_MOD_FILES})`
-        : err.code === 'LIMIT_FILE_SIZE'
-          ? `file too large (max ${MOD_MAX_BYTES / 1024 / 1024} MB per .jar)`
+      const gb = (MOD_MAX_BYTES / 1024 / 1024 / 1024).toFixed(0);
+      const msg = err.code === 'LIMIT_FILE_SIZE'
+          ? `file too large (max ${gb} GB per .jar)`
         : err.message || 'upload failed';
       return res.status(400).json({ error: msg });
     }
     next();
   });
 }, (req, res) => {
-  try {
-    const s = getState();
-    if (!canUploadModsFor(s)) {
-      return res.status(403).json({ error: 'mods upload window is closed' });
-    }
-    const dir = seasonStagingDir(s.seasonName);
-    if (!dir) return res.status(500).json({ error: 'no current season' });
-    fs.mkdirSync(dir, { recursive: true });
-
-    const files = (req.files || [])
-      .map(f => ({ name: safeModName(f.originalname), buffer: f.buffer }))
-      .filter(f => f.name);
-    if (!files.length) return res.json({ ok: true, written: [] });
-
-    for (const f of files) {
-      fs.writeFileSync(path.join(dir, f.name), f.buffer);
-    }
-    res.json({ ok: true, written: files.map(f => f.name) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  res.json({ ok: true, written: (req.files || []).map(f => f.filename) });
 });
 
 // Discard all pending uploads (clear staging dir).

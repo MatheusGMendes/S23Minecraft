@@ -34,8 +34,8 @@ router.post('/api/settings', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// End the setup window: lock + restart MC so the whitelist drops and
-// players can join. Same effect as the 24h auto-lock or `s23 setup-end`.
+// End the setup window: lock + restart MC so the [SETUP] MOTD prefix
+// drops. Same effect as the 24h auto-lock or `s23 setup-end`.
 router.post('/api/setup/end', async (_req, res) => {
   try {
     const s = getState();

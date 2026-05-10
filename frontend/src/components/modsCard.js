@@ -9,11 +9,10 @@ import {
   pendingFiles, pendingDeletions, pendingRemove, clearPending,
 } from '../lib/pending.js';
 
-// Backend caps each request at 20 jars. Chunk larger selections so big
-// modpacks (Forge / Fabric ones easily run 50+ files) upload in sequence
-// rather than failing the batch.
+// Chunk larger selections so big modpacks upload in sequence with
+// per-chunk progress feedback. The backend has no per-request file
+// count limit anymore — this is purely UI cadence.
 const MODS_UPLOAD_CHUNK = 20;
-const MODS_UPLOAD_MAX = 200;
 const PICK_LABEL_DEFAULT = 'Upload .jar files';
 
 let onActionCb = () => {};
@@ -34,15 +33,6 @@ export function initModsCard({ onAction }) {
     const input = e.target;
     if (!input.files || !input.files.length) return;
     const incoming = Array.from(input.files).filter(f => /\.jar$/i.test(f.name));
-    if (pendingFiles.length + incoming.length > MODS_UPLOAD_MAX) {
-      await showModal({
-        title: 'Too many files',
-        message: `Queue would exceed ${MODS_UPLOAD_MAX}. Currently queued: ${pendingFiles.length}. Trying to add: ${incoming.length}.`,
-        cancelLabel: '',
-      });
-      input.value = '';
-      return;
-    }
     for (const f of incoming) {
       // Same-name dedup: replace earlier picks of the same jar.
       pendingRemove(f.name);
@@ -71,7 +61,7 @@ export function initModsCard({ onAction }) {
   document.getElementById('mods-end-btn').addEventListener('click', async () => {
     if (!await showModal({
       title: 'End setup',
-      message: 'End the setup window? Mods will be locked until next season, and the whitelist will be dropped so players can join.',
+      message: 'End the setup window? Mods will be locked until next season, and the [SETUP] MOTD prefix will be dropped.',
       confirmLabel: 'End setup',
     })) return;
     const btn = $('mods-end-btn');

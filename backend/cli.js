@@ -56,7 +56,7 @@ const cmds = {
     const r = db.prepare('SELECT env_setup_mode FROM state WHERE id = 1').get();
     let droppedSetupMode = false;
     if (r.env_setup_mode) {
-      console.log('was in setup mode — dropping setup whitelist and bouncing MC…');
+      console.log('was in setup mode — dropping the [SETUP] MOTD and bouncing MC…');
       writeEnvFile(after.settings, after.seasonName, { setupMode: false });
       try { console.log(await compose(['stop', 'minecraft'])); } catch (e) { console.warn('stop warn:', e.message); }
       console.log(await compose(['up', '-d', 'minecraft']));
@@ -65,7 +65,7 @@ const cmds = {
 
     console.log(`season #${s.seasonId} (${s.seasonName}) marked expired.`);
     console.log('Current MC keeps running on the old world.');
-    if (droppedSetupMode) console.log('Setup whitelist dropped — players can now join this still-running world.');
+    if (droppedSetupMode) console.log('[SETUP] MOTD prefix dropped — server is now advertised normally.');
     console.log('To start a NEW season: open the UI form (now editable) and Apply,');
     console.log('  or run `s23 reset` to reuse the current settings.');
   },
@@ -113,7 +113,7 @@ const cmds = {
     writeEnvFile(after.settings, after.seasonName, { setupMode: false });
     try { console.log(await compose(['stop', 'minecraft'])); } catch (e) { console.warn('stop warn:', e.message); }
     console.log(await compose(['up', '-d', 'minecraft']));
-    console.log('setup ended — mod uploads locked, whitelist dropped, players can join');
+    console.log('setup ended — mod uploads locked, [SETUP] MOTD prefix dropped');
   },
 
   'setup-start': async () => {
@@ -127,7 +127,7 @@ const cmds = {
     writeEnvFile(after.settings, after.seasonName, { setupMode: true });
     try { console.log(await compose(['stop', 'minecraft'])); } catch (e) { console.warn('stop warn:', e.message); }
     console.log(await compose(['up', '-d', 'minecraft']));
-    console.log('setup re-opened — mods are editable again, whitelist re-enabled');
+    console.log('setup re-opened — mods are editable again, [SETUP] MOTD prefix re-applied');
     console.log('subsequent reloads PRESERVE the world by default');
   },
 
@@ -153,8 +153,8 @@ const usage = `usage: s23 <command>
   expires-in <days>   force the deadline to land N days from now
   renew               reset season_started to now (lock for ${LIFETIME_DAYS} more days)
 
-  setup-end           close the mod-setup window — locks mod uploads, drops the [SETUP] whitelist, players can join
-  setup-start         re-open the mod-setup window — unlocks mods, re-enables the whitelist (non-vanilla only)
+  setup-end           close the mod-setup window — locks mod uploads, drops the [SETUP] MOTD prefix
+  setup-start         re-open the mod-setup window — unlocks mods, re-applies the [SETUP] MOTD prefix (non-vanilla only)
 `;
 
 (async () => {
